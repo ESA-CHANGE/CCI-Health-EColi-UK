@@ -1,6 +1,9 @@
 # CHANGE
 
-
+ESA CHANGE: Climate–Health Adaptation through New Generation Earth observations.  \
+[Project website](https://climate.esa.int/es/supporting-the-paris-agreement/CHANGE/)  \
+Involves Peter Miller and Dave Moffat at PML, with guidance from Gemma Kulk and Shubha Sathyendranath.  \
+Oct. 2025 to Sep. 2028.
 
 ## Getting started
 
