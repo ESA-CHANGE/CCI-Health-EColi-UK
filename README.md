@@ -7,7 +7,12 @@ Oct. 2025 to Sep. 2028.
 
 
 ## To do list
-- [ ] To do
+- [ ] How to use SAS gastro data when they are all positive cases? I guess negatives are other regions for same dates?
+- [ ] Try CCI matchup code, or Angus's.
+- [ ] Add more env vars: rainfall, Chl-a, ...
+- [ ] Calculate lat/lon coords for EA UKNG coords.
+- [ ] Try matchup using EA E coli data.
+- [ ] Dave re sample code for Random Forest.
 
 
 ## Different matchup methods
@@ -24,7 +29,8 @@ Oct. 2025 to Sep. 2028.
   - 45% missing. No, that will use the closest time whether or not region is missing.
 
 ### CCI-type matchup
-- 
+- Use from Round Robin scripts.
+- Also Yanna has adapted for her FOCUS and PYROMAR projects for California Chl-a intercomparison.
 
 ### Angus Match-maker
 - Doesn't search in time, only does neighbourhood on map pre-selected for the correct date.
