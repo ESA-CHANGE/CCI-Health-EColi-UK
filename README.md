@@ -15,6 +15,10 @@ Oct. 2025 to Sep. 2028.
 - [ ] Dave re sample code for Random Forest.
 
 
+## Installation
+- Run Notebook using this environment: `/data/abitibi1/scratch/scratch_disk/pim/miniforge3/envs/phyto-cci-pig`
+- We'll probably need to setup a new env for CHANGE later.
+
 ## Different matchup methods
 ### Xarray select or slice
 - Select nearest point in time and coords, all at once, no tolerance.

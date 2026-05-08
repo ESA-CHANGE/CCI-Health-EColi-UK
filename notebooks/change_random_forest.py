@@ -63,7 +63,7 @@ print (f'Env dataset contains {len(env_file_list)} files')
 
 print ('Opening multi-file env data, this may take several minutes...')
 with ProgressBar():
-    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords')
+    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars='all')
 print ('Done')
 
 # match_maker.extract.gridded.nearest(ds, points, k=1, return_distance=False, units='km')
@@ -269,3 +269,118 @@ ax.set_title('SST-coloured points matchups with EA E coli cases on map')
 plt.tight_layout()
 plt.savefig(os.path.join(plots_root, 'sst_ecoli_on_map.png'), dpi=150)
 plt.show()
+
+
+# %%
+# Functions for extracting ERA5 datasets on the fly from Copernicus Data Store
+
+def download_era5_subset(date, area, filename):
+    """
+    Download ERA5 precipitation for a given day and bounding box.
+    area = [North, West, South, East] (degrees, lon in 0–360)
+    """
+    c = cdsapi.Client()
+
+    c.retrieve(
+        "reanalysis-era5-single-levels",
+        {
+            "product_type": "reanalysis",
+            "variable": "total_precipitation",
+            "year": date.strftime("%Y"),
+            "month": date.strftime("%m"),
+            "day": date.strftime("%d"),
+            "time": [f"{h:02d}:00" for h in range(24)],
+            "area": [
+                float(area[0]),
+                float(area[1]),
+                float(area[2]),
+                float(area[3]),
+            ],
+            "format": "netcdf"
+        },
+        filename
+    )
+
+
+def extract_era5_matchups(df, cache_dir="era5_cache", buffer=0.25):
+    """
+    Vectorized ERA5 extraction with spatial subsetting.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Must contain columns: 'time', 'lat', 'lon'
+    cache_dir : str
+        Folder to cache downloaded ERA5 files
+    buffer : float
+        Spatial padding (degrees)
+
+    Returns
+    -------
+    DataFrame with tp_mm column
+    """
+
+    # HERE: Change to temporary directory
+    os.makedirs(cache_dir, exist_ok=True)
+
+    df = df.copy()
+    df["time"] = pd.to_datetime(df["time"])
+    df["lon_era5"] = df["lon"] % 360
+
+    results = []
+
+    # Process per day
+    for date, group in df.groupby(df["time"].dt.date):
+
+        group = group.copy()
+
+        # Spatial subset bounds (tight bounding box)
+        lat_max = group["lat"].max() + buffer
+        lat_min = group["lat"].min() - buffer
+        lon_max = group["lon_era5"].max() + buffer
+        lon_min = group["lon_era5"].min() - buffer
+
+        area = [lat_max, lon_min, lat_min, lon_max]
+
+        fname = os.path.join(cache_dir, f"era5_{date}.nc")
+
+        # Download once per day (cached)
+        if not os.path.exists(fname):
+            download_era5_subset(pd.Timestamp(date), area, fname)
+
+        ds = xr.open_dataset(fname)
+
+        # Vectorized selection
+        times = xr.DataArray(group["time"].values, dims="points")
+        lats  = xr.DataArray(group["lat"].values, dims="points")
+        lons  = xr.DataArray(group["lon_era5"].values, dims="points")
+
+        matched = ds.sel(
+            valid_time=times,
+            latitude=lats,
+            longitude=lons,
+            method="nearest"
+        )
+
+        # Convert to mm
+        tp_mm = matched["tp"].values * 1000
+
+        group["tp_mm"] = tp_mm
+
+        results.append(group)
+
+        ds.close()
+
+    return pd.concat(results).reset_index(drop=True)
+
+
+# %%
+# Test extraction of ERA5 precipitation
+df = pd.DataFrame({
+    "time": ["2020-01-15 12:30", "2020-01-15 03:10"],
+    "lat": [50.4, 51.0],
+    "lon": [-4.1, -3.8]
+})
+out_df = extract_era5_matchups(df)
+
+print(out_df)
