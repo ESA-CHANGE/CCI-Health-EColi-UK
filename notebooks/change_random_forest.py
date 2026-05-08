@@ -16,6 +16,8 @@
 # %% [markdown]
 # ## ESA CHANGE - Experiments with data and Random Forest 
 #
+# ### Installation
+# - Run using this environment (for now): /data/abitibi1/scratch/scratch_disk/pim/miniforge3/envs/phyto-cci-pig
 
 # %%
 # Setup and constants
@@ -36,6 +38,7 @@ from   dask.diagnostics import ProgressBar
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from   pyproj import Transformer
+import cdsapi
 
 # Import PML packages
 # sys.path.append("/users/rsg/anla/code/satellite/match-maker/")
@@ -229,6 +232,9 @@ obs_df = obs_df.dropna(subset=['lon', 'lat'])
 obs_df['date_time'] = pd.to_datetime(obs_df['sampleTime'])
 obs_df
 
+# Restrict data to coastal sites only (not transitional, rivers, etc.)
+obs_df = obs_df[obs_df['siteType'] == 'Coastal']
+
 # Store the data with the lat, lon, time columns
 out_data_name = os.path.join(obs_data_root, 'EA_Ecoli', 'ALL_BW_data_2012-2025_latlon.csv')
 obs_df.to_csv(out_data_name)
@@ -251,7 +257,7 @@ ax.add_feature(cfeature.BORDERS, linewidth=0.3)
 ax.gridlines(draw_labels=True, linewidth=0.3, alpha=0.5)
 
 sc = ax.scatter(obs_filtered_df['lon'], obs_filtered_df['lat'],
-                c=obs_filtered_df['sst'],     # colour by this column
+                # c=obs_filtered_df['sst'],     # colour by this column [Not there yet]
                 cmap='turbo',        # colormap
                 s=100,               # marker size
                 alpha=0.5,
