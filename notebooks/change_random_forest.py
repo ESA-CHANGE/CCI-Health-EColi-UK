@@ -466,8 +466,11 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 print(f'Fitting Random Forest classifier to {len(X_train)} training samples...')
-clf = RandomForestClassifier()
+clf = RandomForestClassifier(max_depth=None, random_state=0)
 clf.fit(X_train, y_train)
+
+# %%
+# Predict E coli counts using the trained model
 
 print(f'Predicting for {len(X_test)} test samples...')
 y_result = clf.predict(X_test)
