@@ -39,6 +39,7 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from   pyproj import Transformer
 import cdsapi
+from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 
 # Import PML packages
@@ -450,14 +451,43 @@ out_df = extract_era5_matchups(df)
 print(out_df)
 
 # %%
-# run command with progress meter
-# for _, row in tqdm(obs_df.iterrows(), total=len(obs_df), desc='Extracting matchups using slice'):
-#     nhood = da.sel(
-#         time=slice(row['date_time'] - time_pad, row['date_time'] + time_pad),
-#         lat=slice(row['lat'] - lat_pad, row['lat'] + lat_pad),
-#         lon=slice(row['lon'] - lon_pad, row['lon'] +
-
-# %%
 # Random Forest to predict E coli given SST and ...
 
+# Remove invalid rows, with missing SST or E coli count
+obs_df = obs_df.dropna(subset=['sst', 'escherichiaColiCount'])
 
+# Terminology: X is table of features, y is array of values to train and predict
+feature_names = ['sst']
+X = obs_df[feature_names]
+y = obs_df['escherichiaColiCount'].transpose()
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y
+)
+
+print(f'Fitting Random Forest classifier to {len(X_train)} training samples...')
+clf = RandomForestClassifier()
+clf.fit(X_train, y_train)
+
+print(f'Predicting for {len(X_test)} test samples...')
+y_result = clf.predict(X_test)
+
+# Plot predicted vs actual E coli counts
+plt.scatter(y_test, y_result, alpha=0.5)
+plt.xlabel('Actual E coli count')
+plt.ylabel('Predicted E coli count')
+plt.title('Predicted vs Actual E coli counts')
+plt.grid(True)
+plt.show()
+
+# Feature importance
+importances = clf.feature_importances_
+std = np.std([tree.feature_importances_ for tree in clf.estimators_], axis=0)
+forest_importances = pd.Series(importances, index=feature_names)
+
+# Plot feature importances with error bars
+fig, ax = plt.subplots()
+forest_importances.plot.bar(yerr=std, ax=ax)
+ax.set_title("Feature importances using mean decrease in impurity")
+ax.set_ylabel("Mean decrease in impurity")
+fig.tight_layout()
