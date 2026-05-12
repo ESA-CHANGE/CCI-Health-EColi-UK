@@ -38,3 +38,10 @@ Oct. 2025 to Sep. 2028.
 
 ### Angus Match-maker
 - Doesn't search in time, only does neighbourhood on map pre-selected for the correct date.
+
+  ncdump -v longitude $file | grep '^ longitude ='
+
+foreach file ( *nc )
+  echo -n "$file - "
+  ncdump -h $file | tail +3 | head -3
+end
