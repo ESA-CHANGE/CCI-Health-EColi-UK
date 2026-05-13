@@ -67,17 +67,19 @@ def download_era5_subset(date, area, filename):
     area = [North, West, South, East] (degrees, lon in 0-360)
     Returns True on failure, False on success.
     """
-    c = cdsapi.Client(quiet=True)   # Suppress verbose output from the API client
+    c = cdsapi.Client(quiet=True, timeout=60,)   # Suppress verbose output from the API client
 
     try: 
         c.retrieve(
             "reanalysis-era5-single-levels",
+            # "reanalysis-era5-single-levels-timeseries",   # Zarr version, supposedly faster but not working for some reason
             {
                 "product_type": "reanalysis",
                 "variable": "total_precipitation",
                 "year": date.strftime("%Y"),
                 "month": date.strftime("%m"),
                 "day": date.strftime("%d"),
+                # Requests all the hours of day for good temporal matching, though this may be slowing it down?
                 "time": [f"{h:02d}:00" for h in range(24)],
                 "area": [
                     float(area[0]),
@@ -85,7 +87,7 @@ def download_era5_subset(date, area, filename):
                     float(area[2]),
                     float(area[3]),
                 ],
-                "format": "netcdf"
+                "format": "netcdf",
             },
             filename
         )
@@ -124,10 +126,12 @@ def extract_era5_matchups(df, cache_dir="/tmp/change/era5_cache", buffer=0.25):
 
     # Process per day, with progress bar (couldn't get that to work)
     # for group in df.groupby(df["time"].dt.date).progress_apply(lambda g: g):
+    # Perhaps would have been quicker to group by month, as CDSAPI has a high overhead per request
     for date, group in df.groupby(df["time"].dt.date):
 
-        #if pd.Timestamp(date) < pd.Timestamp('2012-05-08'):
-        #    continue
+        # if pd.Timestamp(date) == pd.Timestamp('2016-05-17'):
+        #     print (f"Skipping {date} due to known ERA5 download issues")
+        #     continue
         group = group.copy()
 
         # Spatial subset bounds (tight bounding box)
@@ -143,7 +147,8 @@ def extract_era5_matchups(df, cache_dir="/tmp/change/era5_cache", buffer=0.25):
 
         # Download once per day (cached)
         if not os.path.exists(fname):
-            print(f"Downloading {date} for {len(group)} points...")
+            
+            print(f"{pd.to_datetime(pd.Timestamp.now()).strftime('%H:%M:%S')} Downloading {date} for {len(group)} points...")
             if download_era5_subset(pd.Timestamp(date), area, fname):
                 print(f"Failed to download ERA5 data for {date}. Skipping.")
                 continue
@@ -404,6 +409,7 @@ print_df
 
 # %%
 # Matchup EA data with rainfall
+print('Caching and extracting matchups with ERA5 rainfall data, this may take a while...')
 obs_df = extract_era5_matchups(obs_df.rename(columns={'date_time':'time'}), cache_dir=era5_cache) 
 print(f'Missing values: {obs_df['tp_mm'].isnull().sum().sum() / len(obs_df):.1%}')
 
@@ -461,10 +467,12 @@ feature_names = ['sst']
 X = obs_df[feature_names]
 y = obs_df['escherichiaColiCount'].transpose()
 
+# Split into training and test sets
 X_train, X_test, y_train, y_test = train_test_split(
     X, y
 )
 
+# Fit/train a Random Forest classifier
 print(f'Fitting Random Forest classifier to {len(X_train)} training samples...')
 clf = RandomForestClassifier(max_depth=None, random_state=0)
 clf.fit(X_train, y_train)
@@ -494,3 +502,10 @@ forest_importances.plot.bar(yerr=std, ax=ax)
 ax.set_title("Feature importances using mean decrease in impurity")
 ax.set_ylabel("Mean decrease in impurity")
 fig.tight_layout()
+
+# %%
+# Now need to evaluate the model performance, e.g. using R^2, MAE, etc.
+r2 = clf.score(X_test, y_test)
+print(f'R^2 score on test set: {r2:.3f}') 
+mae = np.mean(np.abs(y_test - y_result))
+print(f'Mean Absolute Error on test set: {mae:.3f}')

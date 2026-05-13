@@ -39,9 +39,15 @@ Oct. 2025 to Sep. 2028.
 ### Angus Match-maker
 - Doesn't search in time, only does neighbourhood on map pre-selected for the correct date.
 
-  ncdump -v longitude $file | grep '^ longitude ='
+### Misc commands
+    ncdump -v longitude $file | grep '^ longitude ='
 
-foreach file ( *nc )
-  echo -n "$file - "
-  ncdump -h $file | tail +3 | head -3
-end
+    foreach file ( *nc )
+        echo -n "$file - "
+    ncdump -h $file | tail +3 | head -3
+    end
+
+### Convert netCDF from int64 to int32 so ncview can handle it
+    ncap2 --overwrite --script 'valid_time=int(valid_time)' input_file.nc output_file.nc
+
+ERA5 rainfall data took 943 minutes...
