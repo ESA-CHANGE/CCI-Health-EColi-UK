@@ -50,4 +50,5 @@ Oct. 2025 to Sep. 2028.
 ### Convert netCDF from int64 to int32 so ncview can handle it
     ncap2 --overwrite --script 'valid_time=int(valid_time)' input_file.nc output_file.nc
 
-ERA5 rainfall data took 943 minutes...
+ERA5 rainfall data took 943 minutes... for half of the time period. +478 mins \
+If we had got the Zarr dataset working, perhaps we could have extracted the whole UK region for the whole multi-year period, a lot quicker. It would have increased the size of the cache files, but, would have been more useful for further matchups.

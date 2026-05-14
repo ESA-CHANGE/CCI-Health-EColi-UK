@@ -19,6 +19,9 @@
 # ### Installation
 # - Run using this environment (for now): /data/abitibi1/scratch/scratch_disk/pim/miniforge3/envs/phyto-cci-pig
 
+# %% [markdown]
+# ### Initialisation
+
 # %%
 # Setup and constants
 
@@ -134,7 +137,7 @@ def extract_era5_matchups(df, cache_dir="/tmp/change/era5_cache", buffer=0.25):
         #     continue
         group = group.copy()
 
-        # Spatial subset bounds (tight bounding box)
+        # Spatial subset bounds (tight bounding box) 
         # Care to calculate min lon before it is converted to 0-360, to avoid issues around grenwich meridian
         lat_max = group["lat"].max() + buffer
         lat_min = group["lat"].min() - buffer
@@ -177,6 +180,9 @@ def extract_era5_matchups(df, cache_dir="/tmp/change/era5_cache", buffer=0.25):
     return pd.concat(results).reset_index(drop=True)
 
 
+# %% [markdown]
+# ### Load SST dataset for matchups
+
 # %%
 # # %%script false --no-raise-error     # Disables this cell
 
@@ -207,10 +213,13 @@ print ('Done')
 
 
 print(f'Variables: {list(env_ds.keys())}')
-da = env_ds['analysed_sst'] + KELVIN_TO_CELSIUS
-da
+sst_da = env_ds['analysed_sst'] + KELVIN_TO_CELSIUS
+sst_da
 
 # Do we have to invert the array? 
+
+# %% [markdown]
+# ### Analysis of gastoenteritis cases (SaS)
 
 # %%
 # Load observed locations from CSV file - Surfers Against Sewage data on gastro cases
@@ -231,14 +240,14 @@ obs_df['lat'] = np.float32(obs_df['lat'])
 obs_df = obs_df.dropna(subset=['lon', 'lat'])
 
 # Add time variable, at midday for dates
-obs_df['date_time'] = pd.to_datetime(obs_df['dateenteredwater'], dayfirst=True) + pd.Timedelta(hours=12)
+obs_df['time'] = pd.to_datetime(obs_df['dateenteredwater'], dayfirst=True) + pd.Timedelta(hours=12)
 obs_df
 
 # %%
 # Try a match-up with SST data
 
 # Build coordinate arrays aligned to the DataFrame index
-times = xr.DataArray(pd.DatetimeIndex(obs_df['date_time']), dims="points")
+times = xr.DataArray(pd.DatetimeIndex(obs_df['time']), dims="points")
 lats  = xr.DataArray(obs_df['lat'].values, dims="points")
 lons  = xr.DataArray(obs_df['lon'].values, dims="points")
 
@@ -247,7 +256,7 @@ lons  = xr.DataArray(obs_df['lon'].values, dims="points")
 # 271.35 is temperature of Arctic water, I guess at (0,0) if lat/lon are NaN. -54.53K is missing.
 print('Extracting matchups from dataset...')
 method = 'nearest'
-values = da.sel(
+values = sst_da.sel(
     time=times,
     lat=lats,
     lon=lons,
@@ -256,7 +265,7 @@ values = da.sel(
 
 # Select then interpolate doesn't work for me (3441 missing?)
 # values = (
-#     da.sel(time=times, method=method)
+#     sst_da.sel(time=times, method=method)
 #     .interp(lat=lats, lon=lons)
 # )
 
@@ -279,8 +288,8 @@ print_df
 # # Then use time and coords slice. But we should not average in time.
 # # tqdm makes a progress bar according to the rows of points completed.
 # for _, row in tqdm(obs_df.iterrows(), total=len(obs_df), desc='Extracting matchups using slice'):
-#     nhood = da.sel(
-#         time=slice(row['date_time'] - time_pad, row['date_time'] + time_pad),
+#     nhood = sst_da.sel(
+#         time=slice(row['time'] - time_pad, row['time'] + time_pad),
 #         lat=slice(row['lat'] - lat_pad, row['lat'] + lat_pad),
 #         lon=slice(row['lon'] - lon_pad, row['lon'] + lon_pad),
 #     )
@@ -289,7 +298,7 @@ print_df
 # # Select time first, then slice coords. No, that will use the closest time whether or not region is missing.
 # # for _, row in tqdm(obs_df.iterrows(), total=len(obs_df), desc='Extracting matchups using xxx'):
 # #     nhood = (
-# #         da.sel(time=row['date_time'], method=method)
+# #         sst_da.sel(time=row['time'], method=method)
 # #         .sel(
 # #             lat=slice(row['lat'] - lat_pad, row['lat'] + lat_pad),
 # #             lon=slice(row['lon'] - lon_pad, row['lon'] + lon_pad),
@@ -301,7 +310,7 @@ print_df
 # # Nope, doesn't work due to problems with not monotonically increasing?
 # # for _, row in tqdm(obs_df.iterrows(), total=len(obs_df), desc='Extracting matchups using xxx'):
 # #     nhood = (
-# #         da.sel(time=row['date_time'], method=method, tolerance=pd.Timedelta(days=2))
+# #         sst_da.sel(time=row['time'], method=method, tolerance=pd.Timedelta(days=2))
 # #         .sel(lat=row['lat'], lon=row['lon'], method=method)
 # #     )
 # #     results.append(float(nhood.mean()))
@@ -346,6 +355,9 @@ plt.show()
 out_data_name = os.path.join(obs_data_root, 'outputs', 'sas_23feb_test_sst.csv')
 obs_df.to_csv(out_data_name)
 
+# %% [markdown]
+# ### Analysis of E coli monitoring (EA)
+
 # %%
 # Load observed locations from CSV file - EA monitoring data on E coli
 obs_data_root = '/data/datasets/Projects/CHANGE/data'
@@ -363,7 +375,7 @@ obs_df['lat'], obs_df['lon'] = lats, lons
 obs_df = obs_df.dropna(subset=['lon', 'lat'])
 
 # Add time variable, at midday for dates
-obs_df['date_time'] = pd.to_datetime(obs_df['sampleTime'])
+obs_df['time'] = pd.to_datetime(obs_df['sampleTime'])
 obs_df
 
 # Restrict data to coastal sites only (not transitional, rivers, etc.)
@@ -377,7 +389,7 @@ obs_df.to_csv(out_data_name)
 # Match-up EA E coli with SST data
 
 # Build coordinate arrays aligned to the DataFrame index
-times = xr.DataArray(pd.DatetimeIndex(obs_df['date_time']), dims="points")
+times = xr.DataArray(pd.DatetimeIndex(obs_df['time']), dims="points")
 lats  = xr.DataArray(obs_df['lat'].values, dims="points")
 lons  = xr.DataArray(obs_df['lon'].values, dims="points")
 
@@ -386,7 +398,7 @@ lons  = xr.DataArray(obs_df['lon'].values, dims="points")
 # 271.35 is temperature of Arctic water, I guess at (0,0) if lat/lon are NaN. -54.53K is missing.
 print('Extracting matchups from dataset...')
 method = 'nearest'
-values = da.sel(
+values = sst_da.sel(
     time=times,
     lat=lats,
     lon=lons,
@@ -395,7 +407,7 @@ values = da.sel(
 
 # Select then interpolate doesn't work for me (3441 missing?)
 # values = (
-#     da.sel(time=times, method=method)
+#     sst_da.sel(time=times, method=method)
 #     .interp(lat=lats, lon=lons)
 # )
 
@@ -410,7 +422,7 @@ print_df
 # %%
 # Matchup EA data with rainfall
 print('Caching and extracting matchups with ERA5 rainfall data, this may take a while...')
-obs_df = extract_era5_matchups(obs_df.rename(columns={'date_time':'time'}), cache_dir=era5_cache) 
+obs_df = extract_era5_matchups(obs_df, cache_dir=era5_cache) 
 print(f'Missing values: {obs_df['tp_mm'].isnull().sum().sum() / len(obs_df):.1%}')
 
 
@@ -446,6 +458,31 @@ plt.savefig(os.path.join(plots_root, 'sst_ecoli_on_map.png'), dpi=150)
 plt.show()
 
 # %%
+# Plotting the E coli matchups points on a map, coloured by the precipitation value
+fig, ax = plt.subplots(figsize=(12, 8),
+                       subplot_kw={'projection': ccrs.PlateCarree()})
+
+ax.add_feature(cfeature.LAND, facecolor='lightgray')
+ax.add_feature(cfeature.OCEAN, facecolor='lightblue')
+ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
+ax.add_feature(cfeature.BORDERS, linewidth=0.3)
+ax.gridlines(draw_labels=True, linewidth=0.3, alpha=0.5)
+
+sc = ax.scatter(obs_filtered_df['lon'], obs_filtered_df['lat'],
+                c=obs_filtered_df['tp_mm'],     # colour by this column
+                cmap='turbo',        # colormap
+                s=100,               # marker size
+                alpha=0.5,
+                transform=ccrs.PlateCarree(),
+                zorder=5)
+
+plt.colorbar(sc, ax=ax, label='Total precipitation (mm)', shrink=0.6)
+ax.set_title('Precipitation-coloured points matchups with EA E coli cases on map')
+plt.tight_layout()
+plt.savefig(os.path.join(plots_root, 'tp_ecoli_on_map.png'), dpi=150)
+plt.show()
+
+# %%
 # Test extraction of ERA5 precipitation
 df = pd.DataFrame({
     "time": ["2020-01-15 12:30", "2020-01-15 03:10"],
@@ -456,16 +493,19 @@ out_df = extract_era5_matchups(df)
 
 print(out_df)
 
+# %% [markdown]
+# ### Random Forest classification experiments
+
 # %%
 # Random Forest to predict E coli given SST and ...
 
 # Remove invalid rows, with missing SST or E coli count
-obs_df = obs_df.dropna(subset=['sst', 'escherichiaColiCount'])
+feature_names = ['sst', 'tp_mm']
+obs_valid_df = obs_df.dropna(subset=feature_names + ['escherichiaColiCount'])
 
 # Terminology: X is table of features, y is array of values to train and predict
-feature_names = ['sst']
-X = obs_df[feature_names]
-y = obs_df['escherichiaColiCount'].transpose()
+X = obs_valid_df[feature_names]
+y = obs_valid_df['escherichiaColiCount'].transpose()
 
 # Split into training and test sets
 X_train, X_test, y_train, y_test = train_test_split(
@@ -473,21 +513,21 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 # Fit/train a Random Forest classifier
-print(f'Fitting Random Forest classifier to {len(X_train)} training samples...')
+print(f'Fitting Random Forest classifier to {len(X_train)} training samples of {', '.join(feature_names)}...')
 clf = RandomForestClassifier(max_depth=None, random_state=0)
 clf.fit(X_train, y_train)
 
 # %%
 # Predict E coli counts using the trained model
 
-print(f'Predicting for {len(X_test)} test samples...')
+print(f'Predicting for {len(X_test)} test samples of {', '.join(feature_names)}...')
 y_result = clf.predict(X_test)
 
 # Plot predicted vs actual E coli counts
 plt.scatter(y_test, y_result, alpha=0.5)
 plt.xlabel('Actual E coli count')
 plt.ylabel('Predicted E coli count')
-plt.title('Predicted vs Actual E coli counts')
+plt.title('Predicted vs actual E coli counts')
 plt.grid(True)
 plt.show()
 
@@ -499,7 +539,7 @@ forest_importances = pd.Series(importances, index=feature_names)
 # Plot feature importances with error bars
 fig, ax = plt.subplots()
 forest_importances.plot.bar(yerr=std, ax=ax)
-ax.set_title("Feature importances using mean decrease in impurity")
+ax.set_title("Feature importance using mean decrease in impurity (MDI)")
 ax.set_ylabel("Mean decrease in impurity")
 fig.tight_layout()
 
