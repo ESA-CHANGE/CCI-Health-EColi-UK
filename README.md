@@ -5,91 +5,50 @@ ESA CHANGE: Climate–Health Adaptation through New Generation Earth observation
 Involves Peter Miller and Dave Moffat at PML, with guidance from Gemma Kulk and Shubha Sathyendranath.  \
 Oct. 2025 to Sep. 2028.
 
-## Getting started
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## To do list
+- [ ] How to use SAS gastro data when they are all positive cases? I guess negatives are other regions for same dates?
+- [ ] Try CCI matchup code, or Angus's.
+- [ ] Add more env vars: rainfall, Chl-a, ...
+- [ ] Calculate lat/lon coords for EA UKNG coords.
+- [ ] Try matchup using EA E coli data.
+- [ ] Dave re sample code for Random Forest.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
-
-```
-cd existing_repo
-git remote add origin https://gitlab.rsg.pml.ac.uk/satellite/projects/change.git
-git branch -M main
-git push -uf origin main
-```
-
-## Integrate with your tools
-
-- [ ] [Set up project integrations](https://gitlab.rsg.pml.ac.uk/satellite/projects/change/-/settings/integrations)
-
-## Collaborate with your team
-
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Automatically merge when pipeline succeeds](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing(SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thank you to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
 
 ## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+- Run Notebook using this environment: `/data/abitibi1/scratch/scratch_disk/pim/miniforge3/envs/phyto-cci-pig`
+- We'll probably need to setup a new env for CHANGE later.
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+## Different matchup methods
+### Xarray select or slice
+- Select nearest point in time and coords, all at once, no tolerance.
+  - 19%
+- Select nearest time and slide coords
+  - Doesn't let you.
+- Loop through obs, then slice time and coords
+  - 47% missing.
+- Select time then interolate coords:
+  - 71% missing!
+- Select time first, then slice coords. 
+  - 45% missing. No, that will use the closest time whether or not region is missing.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+### CCI-type matchup
+- Use from Round Robin scripts.
+- Also Yanna has adapted for her FOCUS and PYROMAR projects for California Chl-a intercomparison.
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+### Angus Match-maker
+- Doesn't search in time, only does neighbourhood on map pre-selected for the correct date.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+### Misc commands
+    ncdump -v longitude $file | grep '^ longitude ='
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+    foreach file ( *nc )
+        echo -n "$file - "
+    ncdump -h $file | tail +3 | head -3
+    end
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### Convert netCDF from int64 to int32 so ncview can handle it
+    ncap2 --overwrite --script 'valid_time=int(valid_time)' input_file.nc output_file.nc
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+ERA5 rainfall data took 943 minutes... for half of the time period. +478 mins \
+If we had got the Zarr dataset working, perhaps we could have extracted the whole UK region for the whole multi-year period, a lot quicker. It would have increased the size of the cache files, but, would have been more useful for further matchups.
