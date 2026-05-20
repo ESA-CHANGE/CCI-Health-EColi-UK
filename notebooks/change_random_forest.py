@@ -14,13 +14,13 @@
 # ---
 
 # %% [markdown]
-# ## ESA CHANGE - Experiments with data and Random Forest 
+# # ESA CHANGE - Experiments with data and Random Forest 
 #
-# ### Installation
+# ## Installation
 # - Run using this environment (for now): /data/abitibi1/scratch/scratch_disk/pim/miniforge3/envs/phyto-cci-pig
 
 # %% [markdown]
-# ### Initialisation
+# ## Initialisation
 
 # %%
 # Setup and constants
@@ -30,6 +30,8 @@ import numpy as np
 import xarray as xr
 from   netCDF4 import Dataset
 import matplotlib.pyplot as plt
+import matplotlib.colors as colors
+import matplotlib.ticker as ticker
 import pandas as pd
 import math
 import glob
@@ -58,6 +60,10 @@ era5_cache = '/data/datasets/Projects/CHANGE/data/cache/era5'
 # Initialisation
 os.makedirs(plots_root, exist_ok=True)
 tqdm.pandas()
+
+# Slice for neighbourhood average
+lat_pad = lon_pad = 0.02  # half width of neighbourhood in degrees, so 0.02 gives ~5x5 km.
+time_pad = pd.Timedelta(days=2)
 
 
 # %%
@@ -181,7 +187,7 @@ def extract_era5_matchups(df, cache_dir="/tmp/change/era5_cache", buffer=0.25):
 
 
 # %% [markdown]
-# ### Load SST dataset for matchups
+# ## Load global datasets ready for matchups
 
 # %%
 # # %%script false --no-raise-error     # Disables this cell
@@ -218,8 +224,29 @@ sst_da
 
 # Do we have to invert the array? 
 
+# %%
+# Open Chl-a global dataset, 4km daily - takes 25 mins
+# I could go for 1km data, but the other datasets are >= 4km resolution.
+
+env_file_patt = '/data/datasets/CCI/v6.0-release/geographic/netcdf/daily/chlor_a/20[12]?/*.nc'
+data_var = 'chlor_a'
+
+# Estimate number of files included
+print ("Compiling list of dataset files...")
+env_file_list = glob.glob(env_file_patt)
+print (f'Env dataset contains {len(env_file_list)} files')
+
+print ('Opening multi-file env data, this may take several minutes...')
+with ProgressBar():
+    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars=[data_var])
+env_ds = env_ds.chunk(time=30)
+print(f'Variables: {list(env_ds.keys())}')
+chl_da = env_ds[data_var]
+chl_da = chl_da.sortby('lat')
+chl_da
+
 # %% [markdown]
-# ### Analysis of gastoenteritis cases (SaS)
+# ## Analysis of gastoenteritis cases (SaS)
 
 # %%
 # Load observed locations from CSV file - Surfers Against Sewage data on gastro cases
@@ -282,11 +309,13 @@ print_df
 # # Uses slice for neighbourhood average, takes ~20 mins
 # lat_pad = lon_pad = 0.02  # half width of neighbourhood in degrees, so 0.02 gives ~5x5 km.
 # time_pad = pd.Timedelta(days=2)
-# results = []
 #
 # # You can't use nearest in time if also using a slice in coordinates, so loop through each row of observations.
 # # Then use time and coords slice. But we should not average in time.
+# # Actually, why are we adding a slice in time when there should be identical merged coverage every day?
+# # Then it is taking the mean over 5 days.
 # # tqdm makes a progress bar according to the rows of points completed.
+# results = []
 # for _, row in tqdm(obs_df.iterrows(), total=len(obs_df), desc='Extracting matchups using slice'):
 #     nhood = sst_da.sel(
 #         time=slice(row['time'] - time_pad, row['time'] + time_pad),
@@ -356,7 +385,7 @@ out_data_name = os.path.join(obs_data_root, 'outputs', 'sas_23feb_test_sst.csv')
 obs_df.to_csv(out_data_name)
 
 # %% [markdown]
-# ### Analysis of E coli monitoring (EA)
+# ## Analysis of E coli monitoring (EA)
 
 # %%
 # Load observed locations from CSV file - EA monitoring data on E coli
@@ -386,17 +415,17 @@ out_data_name = os.path.join(obs_data_root, 'EA_Ecoli', 'ALL_BW_data_2012-2025_l
 obs_df.to_csv(out_data_name)
 
 # %%
-# Match-up EA E coli with SST data
+# Match-up EA E coli with SST data - vectorised (~5 mins)
+# Missing values: 8.6% that's not bad, so the coords must usually hit the sea pixels. 
 
 # Build coordinate arrays aligned to the DataFrame index
 times = xr.DataArray(pd.DatetimeIndex(obs_df['time']), dims="points")
 lats  = xr.DataArray(obs_df['lat'].values, dims="points")
 lons  = xr.DataArray(obs_df['lon'].values, dims="points")
 
+print('Extracting matchups from dataset, this may take a while...')
+
 # Vectorised extraction
-# NB produces a lot of 271.35 (=-2.0 'C?), perhaps many are too far inland (700 missing).
-# 271.35 is temperature of Arctic water, I guess at (0,0) if lat/lon are NaN. -54.53K is missing.
-print('Extracting matchups from dataset...')
 method = 'nearest'
 values = sst_da.sel(
     time=times,
@@ -404,14 +433,8 @@ values = sst_da.sel(
     lon=lons,
     method=method,
 )
-
-# Select then interpolate doesn't work for me (3441 missing?)
-# values = (
-#     sst_da.sel(time=times, method=method)
-#     .interp(lat=lats, lon=lons)
-# )
-
 obs_df['sst'] = values
+
 print(f'Missing values: {obs_df['sst'].isnull().sum().sum() / len(obs_df):.1%}')
 
 # Just show selected columns
@@ -419,12 +442,78 @@ print(f'Selected columns:')
 print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
 print_df
 
+# %% magic_args="false --no-raise-error     # Disables this cell, takes too long" language="script"
+#
+# # Match-up EA E coli with SST data
+# # Day-at-a-time rather than vectorised, to allow neighbourhood average
+#
+# print('Extracting matchups from dataset...')
+#
+# # Slightly dodgy as assuming all rows will be processed in time order within groupby.
+# # So changed to write row by row, but now will take 60h...
+# obs_df['sst'] = np.nan
+# grouped = obs_df.groupby(obs_df["time"].dt.date)
+# for date, group in tqdm(grouped, total=grouped.ngroups, desc='Extracting matchups using slice'):
+#     param_group = sst_da.sel(time=date, method='nearest', tolerance=pd.Timedelta(days=2))
+#     for _, row in group.iterrows():
+#         nhood = param_group.sel(
+#             lat=slice(row['lat'] - lat_pad, row['lat'] + lat_pad),
+#             lon=slice(row['lon'] - lon_pad, row['lon'] + lon_pad),
+#         )
+#         row['sst'] = float(nhood.mean())
+#
+# print(f'Missing values: {obs_df['sst'].isnull().sum().sum() / len(obs_df):.1%}')
+#
+# # Just show selected columns
+# print(f'Selected columns:')
+# print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
+# print_df
+
 # %%
 # Matchup EA data with rainfall
 print('Caching and extracting matchups with ERA5 rainfall data, this may take a while...')
 obs_df = extract_era5_matchups(obs_df, cache_dir=era5_cache) 
 print(f'Missing values: {obs_df['tp_mm'].isnull().sum().sum() / len(obs_df):.1%}')
 
+
+# %%
+# Match-up EA E coli with chl-a data - vectorised (~? mins)
+# Missing values: ??
+
+# Build coordinate arrays aligned to the DataFrame index
+times = xr.DataArray(pd.DatetimeIndex(obs_df['time']), dims="points")
+lats  = xr.DataArray(obs_df['lat'].values, dims="points")
+lons  = xr.DataArray(obs_df['lon'].values, dims="points")
+method = 'nearest'
+
+# Chop out subscene
+print('Making subscene...')
+region_da = chl_da.sel(
+    time=slice(obs_df['time'].min() - time_pad, obs_df['time'].max() + time_pad),
+    lat=slice(obs_df['lat'].min() - lat_pad, obs_df['lat'].max() + lat_pad),
+    lon=slice(obs_df['lon'].min() - lon_pad, obs_df['lon'].max() + lon_pad),
+)
+
+# Vectorised extraction
+# Dask delayed run to enable use of progress bar
+print('Extracting matchups from dataset, this may take a while...')
+interp_delayed = region_da.sel(
+    time=times,
+    lat=lats,
+    lon=lons,
+    method=method,
+).load(compute=False)
+with ProgressBar():
+    values = interp_delayed.compute()
+
+obs_df['chl'] = values
+
+print(f'Missing values: {obs_df['chl'].isnull().sum().sum() / len(obs_df):.1%}')
+
+# Just show selected columns
+print(f'Selected columns:')
+print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
+print_df
 
 # %%
 # Abritrary threshold of EA E coli data for plotting test
@@ -483,6 +572,33 @@ plt.savefig(os.path.join(plots_root, 'tp_ecoli_on_map.png'), dpi=150)
 plt.show()
 
 # %%
+# Plotting the E coli matchups points on a map, coloured by the chl value
+fig, ax = plt.subplots(figsize=(12, 8),
+                       subplot_kw={'projection': ccrs.PlateCarree()})
+
+ax.add_feature(cfeature.LAND, facecolor='lightgray')
+ax.add_feature(cfeature.OCEAN, facecolor='lightblue')
+ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
+ax.add_feature(cfeature.BORDERS, linewidth=0.3)
+ax.gridlines(draw_labels=True, linewidth=0.3, alpha=0.5)
+
+sc = ax.scatter(obs_filtered_df['lon'], obs_filtered_df['lat'],
+                c=obs_filtered_df['chl'],     # colour by this column
+                cmap='turbo',        # colormap
+                s=100,               # marker size
+                alpha=0.5,
+                transform=ccrs.PlateCarree(),
+                zorder=5,
+                norm=colors.LogNorm())
+
+cb = plt.colorbar(sc, ax=ax, label='Chl-a (mg m^-3 m)', shrink=0.6)
+cb.ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f'{x:g}'))
+ax.set_title('Chl-a-coloured points matchups with EA E coli cases on map')
+plt.tight_layout()
+plt.savefig(os.path.join(plots_root, 'chl_ecoli_on_map.png'), dpi=150)
+plt.show()
+
+# %%
 # Test extraction of ERA5 precipitation
 df = pd.DataFrame({
     "time": ["2020-01-15 12:30", "2020-01-15 03:10"],
@@ -494,13 +610,13 @@ out_df = extract_era5_matchups(df)
 print(out_df)
 
 # %% [markdown]
-# ### Random Forest classification experiments
+# ## Random Forest classification experiments
 
 # %%
 # Random Forest to predict E coli given SST and ...
 
 # Remove invalid rows, with missing SST or E coli count
-feature_names = ['sst', 'tp_mm']
+feature_names = ['sst', 'tp_mm', 'chl']
 obs_valid_df = obs_df.dropna(subset=feature_names + ['escherichiaColiCount'])
 
 # Terminology: X is table of features, y is array of values to train and predict
@@ -549,3 +665,12 @@ r2 = clf.score(X_test, y_test)
 print(f'R^2 score on test set: {r2:.3f}') 
 mae = np.mean(np.abs(y_test - y_result))
 print(f'Mean Absolute Error on test set: {mae:.3f}')
+
+# %%
+# Store variables so we don't have to regenerate them
+# %store obs_df obs_filtered_df sst_da chl_da
+
+# %%
+# Restore all variables from store
+# %store -r
+type(obs_df)
