@@ -107,7 +107,7 @@ def download_era5_subset(date, area, filename):
     return False  # Indicate success
 
 
-def extract_era5_matchups(df, cache_dir="/tmp/change/era5_cache", buffer=0.25):
+def extract_era5_matchups(df, cache_dir="/tmp/change/era5_cache", buffer=0.25, daily=False):
     """
     Vectorized ERA5 extraction with spatial subsetting.
 
@@ -119,6 +119,8 @@ def extract_era5_matchups(df, cache_dir="/tmp/change/era5_cache", buffer=0.25):
         Folder to cache downloaded ERA5 files
     buffer : float
         Spatial padding (degrees)
+    day : boolean
+        Return daily average instead of instantaneous (hourly)
 
     Returns
     -------
@@ -178,7 +180,10 @@ def extract_era5_matchups(df, cache_dir="/tmp/change/era5_cache", buffer=0.25):
 
         # Convert rainfall from m to mm
         tp_mm = matched["tp"].values * 1000
-        group["tp_mm"] = tp_mm
+        if daily:
+            group["tp_mm_daily"] = group["tp_mm"].groupby(group["time"].dt.date).transform("sum")
+        else:
+            group["tp_mm"] = tp_mm
 
         results.append(group)
         ds.close()
@@ -477,6 +482,12 @@ print(f'Missing values: {obs_df['tp_mm'].isnull().sum().sum() / len(obs_df):.1%}
 
 
 # %%
+# Matchup EA data with rainfall - daily sum
+print('Caching and extracting matchups with ERA5 daily rainfall data, this may take a while...')
+obs_df = extract_era5_matchups(obs_df, cache_dir=era5_cache, daily=True) 
+print(f'Missing values: {obs_df["tp_mm_daily"].isnull().sum().sum() / len(obs_df):.1%}')
+
+# %%
 # Match-up EA E coli with chl-a data - vectorised (~? mins)
 # Missing values: ??
 
@@ -591,7 +602,7 @@ sc = ax.scatter(obs_filtered_df['lon'], obs_filtered_df['lat'],
                 zorder=5,
                 norm=colors.LogNorm())
 
-cb = plt.colorbar(sc, ax=ax, label='Chl-a (mg m^-3 m)', shrink=0.6)
+cb = plt.colorbar(sc, ax=ax, label='Chl-a (mg m^-3)', shrink=0.6)
 cb.ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f'{x:g}'))
 ax.set_title('Chl-a-coloured points matchups with EA E coli cases on map')
 plt.tight_layout()
@@ -616,7 +627,7 @@ print(out_df)
 # Random Forest to predict E coli given SST and ...
 
 # Remove invalid rows, with missing SST or E coli count
-feature_names = ['sst', 'tp_mm', 'chl']
+feature_names = ['sst', 'tp_mm', 'tp_mm_daily', 'chl']
 obs_valid_df = obs_df.dropna(subset=feature_names + ['escherichiaColiCount'])
 
 # Terminology: X is table of features, y is array of values to train and predict
@@ -666,6 +677,9 @@ print(f'R^2 score on test set: {r2:.3f}')
 mae = np.mean(np.abs(y_test - y_result))
 print(f'Mean Absolute Error on test set: {mae:.3f}')
 
+# %% [markdown]
+# ## Misc commands
+
 # %%
 # Store variables so we don't have to regenerate them
 # %store obs_df obs_filtered_df sst_da chl_da
@@ -673,4 +687,4 @@ print(f'Mean Absolute Error on test set: {mae:.3f}')
 # %%
 # Restore all variables from store
 # %store -r
-type(obs_df)
+# %store
