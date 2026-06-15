@@ -46,6 +46,8 @@ from   pyproj import Transformer
 import cdsapi
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
+from datetime import timedelta
+import itertools
 
 # Import PML packages
 # sys.path.append("/users/rsg/anla/code/satellite/match-maker/")
@@ -56,6 +58,7 @@ KELVIN_TO_CELSIUS = -273.15
 
 plots_root = '/data/datasets/Projects/CHANGE/data/outputs/plots'
 era5_cache = '/data/datasets/Projects/CHANGE/data/cache/era5'
+landcov_cache = '/data/datasets/Projects/CHANGE/data/cache/landcov'
 
 # Initialisation
 os.makedirs(plots_root, exist_ok=True)
@@ -65,21 +68,30 @@ tqdm.pandas()
 lat_pad = lon_pad = 0.02  # half width of neighbourhood in degrees, so 0.02 gives ~5x5 km.
 time_pad = pd.Timedelta(days=2)
 
+# Time lags
+lag_precip = [1, 2, 4, 7]
+lag_sst = lag_precip
+lag_chl = lag_precip
+
+MRLC_VERSION_MAP = {year: "v2.0.7cds" if year <= 2015 else "v2.1.1"
+            for year in range(1992, 2030)}
+
 
 # %%
 # Functions for extracting ERA5 datasets on the fly from Copernicus Data Store.
 # Note that you need to have cached username/password credentials set up for this to work.
 
-def download_era5_subset(date, area, filename):
+def download_era5_subset(date, area, filename, client=None):
     """
     Download ERA5 precipitation for a given day and bounding box.
     area = [North, West, South, East] (degrees, lon in 0-360)
     Returns True on failure, False on success.
     """
-    c = cdsapi.Client(quiet=True, timeout=60,)   # Suppress verbose output from the API client
+    if client is None:
+        client = cdsapi.Client(quiet=True, timeout=60,)   # Suppress verbose output from the API client
 
     try: 
-        c.retrieve(
+        client.retrieve(
             "reanalysis-era5-single-levels",
             # "reanalysis-era5-single-levels-timeseries",   # Zarr version, supposedly faster but not working for some reason
             {
@@ -90,7 +102,7 @@ def download_era5_subset(date, area, filename):
                 "day": date.strftime("%d"),
                 # Requests all the hours of day for good temporal matching, though this may be slowing it down?
                 "time": [f"{h:02d}:00" for h in range(24)],
-                "area": [
+                "area": [               # TL, BR: lat_max, lon_min, lat_min, lon_max
                     float(area[0]),
                     float(area[1]),
                     float(area[2]),
@@ -107,7 +119,45 @@ def download_era5_subset(date, area, filename):
     return False  # Indicate success
 
 
-def extract_era5_matchups(df, cache_dir="/tmp/change/era5_cache", buffer=0.25, daily=False):
+def download_era5_subset_daily_year(date_from, date_to, area, filename, client=None):
+    """
+    Download ERA5 precipitation for a given day and bounding box.
+    area = [North, West, South, East] (degrees, lon in 0-360)
+    Returns True on failure, False on success.
+    """
+    if client is None:
+        client = cdsapi.Client(quiet=True, timeout=60,)   # Suppress verbose output from the API client
+
+    try: 
+        client.retrieve(
+            "derived-era5-single-levels-daily-statistics",
+            {
+                "product_type": "reanalysis",
+                "variable": "total_precipitation",
+                "daily_statistic": "daily_sum",
+                "time_zone": "utc+00:00",
+                "frequency": "1_hourly",
+                "year": year,
+                "month": [f"{m:02d}" for m in range(date_from.month, date_to.month+1)],
+                "day": [f"{d:02d}" for d in range(1, 31+1)],
+                "area": [               # TL, BR: lat_max, lon_min, lat_min, lon_max
+                    float(area[0]),
+                    float(area[1]),
+                    float(area[2]),
+                    float(area[3]),
+                ],
+                "format": "netcdf",
+            },
+            filename
+        )
+    except Exception as e:
+        print(f"Warning: Failed to download ERA5 data for {year} with area {area}. Error: {e}")
+        return True  # Indicate failure
+    
+    return False  # Indicate success
+
+
+def extract_era5_matchups(df, cache_dir="/tmp/change/era5_cache", buffer=0.25, daily=False, time_offset=None, col_name=None):
     """
     Vectorized ERA5 extraction with spatial subsetting.
 
@@ -121,24 +171,32 @@ def extract_era5_matchups(df, cache_dir="/tmp/change/era5_cache", buffer=0.25, d
         Spatial padding (degrees)
     day : boolean
         Return daily average instead of instantaneous (hourly)
+    time_offset : timedelta
+    col_name : specify column name
 
     Returns
     -------
     DataFrame with tp_mm column
     """
 
-    os.makedirs(cache_dir, exist_ok=True)
+    cache_dir_this = os.path.join(cache_dir, col_name)
+    os.makedirs(cache_dir_this, exist_ok=True)
     df = df.copy()
     df["time"] = pd.to_datetime(df["time"])
+    df["time_ext"] = df["time"]
+    if time_offset is not None:
+        df["time_ext"] = df["time_ext"] + time_offset
+
     # Works better using standard lon (-180..180), gave errors when using 0..360.
     # df["lon_era5"] = df["lon"] % 360    # ERA5 uses 0–360 for longitude, so convert if necessary.
 
     results = []
+    client = cdsapi.Client(quiet=True, timeout=60,)   # Suppress verbose output from the API client
 
     # Process per day, with progress bar (couldn't get that to work)
     # for group in df.groupby(df["time"].dt.date).progress_apply(lambda g: g):
     # Perhaps would have been quicker to group by month, as CDSAPI has a high overhead per request
-    for date, group in df.groupby(df["time"].dt.date):
+    for date, group in df.groupby(df["time_ext"].dt.date):
 
         # if pd.Timestamp(date) == pd.Timestamp('2016-05-17'):
         #     print (f"Skipping {date} due to known ERA5 download issues")
@@ -154,20 +212,23 @@ def extract_era5_matchups(df, cache_dir="/tmp/change/era5_cache", buffer=0.25, d
 
         area = [lat_max, lon_min, lat_min, lon_max]
 
-        fname = os.path.join(cache_dir, f"era5_{date}.nc")
+        fname = os.path.join(cache_dir_this, f"era5_{date}.nc")
 
         # Download once per day (cached)
         if not os.path.exists(fname):
             
-            print(f"{pd.to_datetime(pd.Timestamp.now()).strftime('%H:%M:%S')} Downloading {date} for {len(group)} points...")
-            if download_era5_subset(pd.Timestamp(date), area, fname):
+            print(f"{pd.to_datetime(pd.Timestamp.now()).strftime('%H:%M:%S')} Downloading {date} for {len(group)} points...", end="")
+            if time_offset is not None:
+                print(f" (for {pd.Timestamp(group["time"].values[0]).date()})", end="")
+
+            if download_era5_subset(pd.Timestamp(date), area, fname, client=client):
                 print(f"Failed to download ERA5 data for {date}. Skipping.")
                 continue
 
         ds = xr.open_dataset(fname)
 
         # Vectorized selection
-        times = xr.DataArray(group["time"].values, dims="points")
+        times = xr.DataArray(group["time_ext"].values, dims="points")
         lats  = xr.DataArray(group["lat"].values, dims="points")
         lons  = xr.DataArray(group["lon"].values, dims="points")
 
@@ -181,14 +242,109 @@ def extract_era5_matchups(df, cache_dir="/tmp/change/era5_cache", buffer=0.25, d
         # Convert rainfall from m to mm
         tp_mm = matched["tp"].values * 1000
         if daily:
-            group["tp_mm_daily"] = group["tp_mm"].groupby(group["time"].dt.date).transform("sum")
+            if not col_name:
+                col_name = "tp_mm_daily"
+            group[col_name] = group["tp_mm"].groupby(group["time_ext"].dt.date).transform("sum")
         else:
-            group["tp_mm"] = tp_mm
+            if not col_name:
+                col_name = "tp_mm"
+            group[col_name] = tp_mm
 
         results.append(group)
         ds.close()
 
-    return pd.concat(results).reset_index(drop=True)
+    results = pd.concat(results).reset_index(drop=True)
+    results.drop(column="time_ext")
+
+    return results
+
+def extract_era5_region(df, cache_dir="/tmp/change/era5_cache", buffer=0.25, daily=False, max_offset=None, col_name=None):
+    """
+    ERA5 extraction of spatial subsetting.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Must contain columns: 'time', 'lat', 'lon'
+    cache_dir : str
+        Folder to cache downloaded ERA5 files
+    buffer : float
+        Spatial padding (degrees)
+    day : boolean
+        Return daily average instead of instantaneous (hourly)
+    max_offset : timedelta
+    col_name : specify column name
+
+    Returns
+    -------
+    DataFrame with tp_mm column
+    """
+
+    cache_dir_this = os.path.join(cache_dir, col_name)
+    os.makedirs(cache_dir_this, exist_ok=True)
+    df = df.copy()
+    df["time"] = pd.to_datetime(df["time"])
+    area = [df["lat"].max() + buffer, df["lon"].min() - buffer, df["lat"].min() - buffer, df["lon"].max() + buffer]
+    print(f"Extracting ERA5 for region spanning {area[0]:.3f} to {area[2]:.3f} lat, {area[1]:.3f} to {area[3]:.3f} lon")
+    
+    results = []
+    client = cdsapi.Client(quiet=False, debug=False, timeout=60,)   # Suppress verbose output from the API client
+
+    # Loop through years
+    for year, ygroup in df.groupby(df["time"].dt.year):
+        year_span = [ygroup.time.min().date(), ygroup.time.max().date()]
+        year_span[0] = year_span[0] + max_offset    # Max negative offset
+        print(f"{pd.to_datetime(pd.Timestamp.now()).strftime('%H:%M:%S')} Processing {year}, spanning {year_span[0]} to {year_span[1]}...")
+
+        fname = os.path.join(cache_dir_this, f"era5_{year}.nc")
+
+        # Download once per year (cached)
+        if not os.path.exists(fname):
+            
+            print(f"{pd.to_datetime(pd.Timestamp.now()).strftime('%H:%M:%S')} Downloading {year}...")
+
+            if download_era5_subset_daily_year(year_span[0], year_span[1], area, fname, client=client):
+                print(f"Failed to download ERA5 data for {year}. Skipping.")
+                continue
+    
+    return results
+
+
+# %%
+"""
+Download a regional subset of ESA CCI Land Cover v2.1.1 from Copernicus CDS
+using server-side spatial subsetting via the 'area' parameter.
+
+Version notes:
+    v2.0.7cds  ->  years 1992–2015
+    v2.1.1     ->  years 2016–present
+    Both share the same processing chain and can be combined into a
+    consistent time series.
+"""
+
+def download_mrlc_year(client, year, area, out_dir):
+
+    version = MRLC_VERSION_MAP[year]
+    out_path = os.path.join(out_dir, f"ESA_LC_{year}_subset.nc")
+
+    if out_path.exists():
+        print(f"Already exists, skipping: {out_path.name}")
+        return out_path
+
+    client.retrieve(
+        "satellite-land-cover",
+        {
+            "variable":    "all",
+            "year":        str(year),
+            "version":     version,
+            "area":        area,        # [North, West, South, East]
+            "data_format": "netcdf",    # 'data_format' replaces 'format' in new CDS API
+        },
+        out_path,
+    )
+
+    return out_path
+
 
 
 # %% [markdown]
@@ -249,6 +405,36 @@ print(f'Variables: {list(env_ds.keys())}')
 chl_da = env_ds[data_var]
 chl_da = chl_da.sortby('lat')
 chl_da
+
+# %%
+# Extract lagged rainfall data for whole UK for all dates, rather than tiny patches per sample per lag
+
+print(f'\nExtracting precipitation matchups...')
+max_offset = timedelta(days=-max(lag_precip)*2)
+extract_era5_region(obs_df, cache_dir=era5_cache, daily=True, max_offset=max_offset, col_name='tp_mm_daily_region')
+
+
+# %%
+# Open rainfall data
+HERE
+
+# %%
+# Open ESA Land Cover-CCI  global dataset, 300m, annual
+# Catalogue: https://catalogue.ceda.ac.uk/uuid/b382ebe6679d44b8b0e68ea4ef4b701c/
+
+# Bounding box [North, West, South, East] in decimal degrees
+area = [obs_df['lat'].max(), obs_df['lon'].min(), obs_df['lat'].min(), obs_df['lon'].max()]
+area += [lat_pad, -lon_pad, -lat_pad, lon_pad]
+year_range = [obs_df['time'].min().year, obs_df['time'].max().year]
+
+os.makedirs(landcov_cache, exist_ok=True)
+client = cdsapi.Client()   # reads ~/.cdsapirc automatically
+
+for year in range(year_range[0], year_range[1]+1):
+    print (f"Downloading year {year}...")
+    download_mrlc_year(client, area, year, landcov_cache)
+
+print('Finished')
 
 # %% [markdown]
 # ## Analysis of gastoenteritis cases (SaS)
@@ -355,6 +541,41 @@ print_df
 #
 
 # %%
+# Time-lagged SST matchups
+lats  = xr.DataArray(obs_df['lat'].values, dims="points")
+lons  = xr.DataArray(obs_df['lon'].values, dims="points")
+
+for lag_days in lag_sst:
+
+# Build coordinate arrays aligned to the DataFrame index
+    times = xr.DataArray(pd.DatetimeIndex(obs_df['time'] + timedelta(days=-lag_days)), dims="points")
+    col_name = f'sst_lag_{lag_days}d'
+
+    # Vectorised extraction
+    print(f'\nExtracting SST matchups with {lag_days} days lag..')
+    method = 'nearest'
+    values = sst_da.sel(
+        time=times,
+        lat=lats,
+        lon=lons,
+        method=method,
+    )
+
+    # Select then interpolate doesn't work for me (3441 missing?)
+    # values = (
+    #     sst_da.sel(time=times, method=method)
+    #     .interp(lat=lats, lon=lons)
+    # )
+
+    obs_df[col_name] = values
+    print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
+
+# Just show selected columns
+print(f'Selected columns:')
+print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
+print_df
+
+# %%
 # Simple plot of the matchup SST values
 plt.plot(obs_df['sst'])
 min(obs_df['sst'])
@@ -419,6 +640,9 @@ obs_df = obs_df[obs_df['siteType'] == 'Coastal']
 out_data_name = os.path.join(obs_data_root, 'EA_Ecoli', 'ALL_BW_data_2012-2025_latlon.csv')
 obs_df.to_csv(out_data_name)
 
+# %% [markdown]
+# ### SST matchups
+
 # %%
 # Match-up EA E coli with SST data - vectorised (~5 mins)
 # Missing values: 8.6% that's not bad, so the coords must usually hit the sea pixels. 
@@ -474,6 +698,9 @@ print_df
 # print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
 # print_df
 
+# %% [markdown]
+# ### Rainfall matchups
+
 # %%
 # Matchup EA data with rainfall
 print('Caching and extracting matchups with ERA5 rainfall data, this may take a while...')
@@ -488,6 +715,25 @@ obs_df = extract_era5_matchups(obs_df, cache_dir=era5_cache, daily=True)
 print(f'Missing values: {obs_df["tp_mm_daily"].isnull().sum().sum() / len(obs_df):.1%}')
 
 # %%
+# Matchup EA data with lagged rainfall - daily sum
+# I think it would have been better to extract the data for whole UK for all dates, rather than tiny patches per sample per lag, 
+
+for lag_days in lag_precip:
+    col_name = f'tp_mm_daily_lag_{lag_days}d'
+
+    # Vectorised extraction
+    print(f'\nExtracting precipitation matchups with {lag_days} days lag..')
+    obs_df = extract_era5_matchups(obs_df, cache_dir=era5_cache, daily=True, time_offset=timedelta(days=-lag_days), col_name=col_name)
+    print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
+
+    # Store results
+    # %store obs_df
+
+
+# %% [markdown]
+# ### Chl-a matchups
+
+# %%
 # Match-up EA E coli with chl-a data - vectorised (~? mins)
 # Missing values: ??
 
@@ -500,37 +746,59 @@ method = 'nearest'
 # Chop out subscene
 print('Making subscene...')
 region_da = chl_da.sel(
-    time=slice(obs_df['time'].min() - time_pad, obs_df['time'].max() + time_pad),
+    time=slice(obs_df['time'].min() - lag_chl.max() - time_pad, obs_df['time'].max() + time_pad),
     lat=slice(obs_df['lat'].min() - lat_pad, obs_df['lat'].max() + lat_pad),
     lon=slice(obs_df['lon'].min() - lon_pad, obs_df['lon'].max() + lon_pad),
 )
 
-# Vectorised extraction
-# Dask delayed run to enable use of progress bar
-print('Extracting matchups from dataset, this may take a while...')
-interp_delayed = region_da.sel(
-    time=times,
-    lat=lats,
-    lon=lons,
-    method=method,
-).load(compute=False)
-with ProgressBar():
-    values = interp_delayed.compute()
+# Loop through time lags for chl-a, including no lag
+for lag_days in lag_chl: # [0] + lag_chl:
+    if lag_days == 0:
+        col_name = 'chl'
+    else:
+        col_name = f'chl_lag_{lag_days}d'
 
-obs_df['chl'] = values
+    # Vectorised extraction
+    # Dask delayed run to enable use of progress bar
+    print('Extracting matchups from dataset', end='')
+    if lag_days != 0:
+        print(f' with {lag_days} days lag', end='')
+    print(', this may take a while...')
+    interp_delayed = region_da.sel(
+        time=times + timedelta(days=-lag_days),
+        lat=lats,
+        lon=lons,
+        method=method,
+    ).load(compute=False)
+    with ProgressBar():
+        values = interp_delayed.compute()
 
-print(f'Missing values: {obs_df['chl'].isnull().sum().sum() / len(obs_df):.1%}')
+    obs_df[col_name] = values
+
+    print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
+
+# Store results
+# %store obs_df
 
 # Just show selected columns
 print(f'Selected columns:')
 print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
 print_df
 
+# %% [markdown]
+# ### Land cover matchups
+
+# %%
+# Matchup EA data with land cover
+
 # %%
 # Abritrary threshold of EA E coli data for plotting test
 high_ecoli = {'=', '>'}
 obs_filtered_df = obs_df[obs_df['escherichiaColiQualifier'].isin(high_ecoli)]
 obs_filtered_df
+
+# %% [markdown]
+# ### Plot matchups on map
 
 # %%
 # Plotting the E coli matchups points on a map, coloured by the SST value
@@ -627,7 +895,13 @@ print(out_df)
 # Random Forest to predict E coli given SST and ...
 
 # Remove invalid rows, with missing SST or E coli count
-feature_names = ['sst', 'tp_mm', 'tp_mm_daily', 'chl']
+lag_names = [f'{v}_lag_{d}d' for v, d in itertools.product(['sst'], lag_precip)]
+feature_names = ['sst', 'tp_mm_daily', 'chl'] + lag_names
+# feature_names = ['sst', 'tp_mm_daily', 'chl']
+# feature_names = ['sst', 'tp_mm_daily', 'chl', 'tp_mm_daily_lag_7d'] + [f'{v}_lag_{d}d' for v, d in itertools.product(['tp_mm_daily'], lag_precip)]
+# feature_names = ['tp_mm_daily']
+
+print(f'Using features: {feature_names}')
 obs_valid_df = obs_df.dropna(subset=feature_names + ['escherichiaColiCount'])
 
 # Terminology: X is table of features, y is array of values to train and predict
@@ -688,3 +962,6 @@ print(f'Mean Absolute Error on test set: {mae:.3f}')
 # Restore all variables from store
 # %store -r
 # %store
+
+# %%
+obs_df
