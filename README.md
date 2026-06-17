@@ -80,12 +80,18 @@ If we had got the Zarr dataset working, perhaps we could have extracted the whol
 ## Lagging parameters
 - https://stackoverflow.com/questions/37152723/how-to-auto-discover-a-lagging-of-time-series-data-in-scikit-learn-and-classify
 - https://scikit-learn.org/stable/auto_examples/applications/plot_time_series_lagged_features.html
+- Amy recommended [R package dlnm](http://www.ag-myresearch.com/package-dlnm.html), though can be called from [Python pydlnm module](https://github.com/aedessler/pydlnm), still needs R installed.
+
 
 ## Evaluation metrics
 - So far r^2.
+- [Evaluating a Random Forest model](https://medium.com/analytics-vidhya/evaluating-a-random-forest-model-9d165595ad56) on Medium, using sk-learn.
+
 
 ## Optimising feature selection
 - Why are single features higher r^2 than several combined?
+- Macarena recommended [Optuna - A hyperparameter optimization framework](https://optuna.org/) and helpful [Random Forest optimisation tutorial](https://medium.com/@ehsannabatchian/optimizing-random-forest-models-a-deep-dive-into-hyperparameter-tuning-with-optuna-b8e4fe7f3670).
+
 
 ## CDS processing issues
 - See your jobs in queue at: https://cds.climate.copernicus.eu/requests?tab=all

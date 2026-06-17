@@ -434,8 +434,7 @@ with ProgressBar():
 env_ds = env_ds.rename({'valid_time': 'time', 'latitude': 'lat', 'longitude': 'lon'})
 print(f'Variables: {list(env_ds.keys())}')
 # Convert rainfall from m to mm
-env_ds = env_ds.rename({'tp': 'tp_daily_mm'})
-tp_mm_daily_da = env_ds['tp_daily_mm'] * 1000
+tp_mm_daily_da = (env_ds['tp'] * 1000).rename('tp_daily_mm')
 tp_mm_daily_da = tp_mm_daily_da.sortby('lat')
 tp_mm_daily_da
 
@@ -481,8 +480,7 @@ env_file_list = glob.glob(env_file_patt)
 print (f'Env dataset contains {len(env_file_list)} files')
 
 print ('Opening multi-file env data, this may take several minutes...')
-with ProgressBar():
-    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars=[data_var])
+env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars=[data_var])
 print(f'Variables: {list(env_ds.keys())}')
 landcov_da = env_ds[data_var]
 landcov_da = landcov_da.sortby('lat')
@@ -1077,3 +1075,9 @@ print(f'Mean Absolute Error on test set: {mae:.3f}')
 
 # %%
 obs_df
+
+# %%
+plt.scatter(obs_df['tp_mm_daily_lag_7d'], obs_df['tp_mm_daily'], alpha=0.1)
+
+times_df = tp_mm_daily_da['time'].values
+point = tp_mm_daily_da
