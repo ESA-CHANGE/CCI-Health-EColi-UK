@@ -86,3 +86,6 @@ If we had got the Zarr dataset working, perhaps we could have extracted the whol
 
 ## Optimising feature selection
 - Why are single features higher r^2 than several combined?
+
+## CDS processing issues
+- See your jobs in queue at: https://cds.climate.copernicus.eu/requests?tab=all

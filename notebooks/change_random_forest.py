@@ -48,6 +48,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from datetime import timedelta
 import itertools
+import zipfile
 
 # Import PML packages
 # sys.path.append("/users/rsg/anla/code/satellite/match-maker/")
@@ -73,9 +74,12 @@ lag_precip = [1, 2, 4, 7]
 lag_sst = lag_precip
 lag_chl = lag_precip
 
-MRLC_VERSION_MAP = {year: "v2.0.7cds" if year <= 2015 else "v2.1.1"
+MRLC_VERSION_MAP = {year: "v2_0_7cds" if year <= 2015 else "v2_1_1"
             for year in range(1992, 2030)}
 
+
+# %% [markdown]
+# ### Function definitions
 
 # %%
 # Functions for extracting ERA5 datasets on the fly from Copernicus Data Store.
@@ -102,12 +106,7 @@ def download_era5_subset(date, area, filename, client=None):
                 "day": date.strftime("%d"),
                 # Requests all the hours of day for good temporal matching, though this may be slowing it down?
                 "time": [f"{h:02d}:00" for h in range(24)],
-                "area": [               # TL, BR: lat_max, lon_min, lat_min, lon_max
-                    float(area[0]),
-                    float(area[1]),
-                    float(area[2]),
-                    float(area[3]),
-                ],
+                "area": area,       # TL, BR: lat_max, lon_min, lat_min, lon_max
                 "format": "netcdf",
             },
             filename
@@ -137,15 +136,10 @@ def download_era5_subset_daily_year(date_from, date_to, area, filename, client=N
                 "daily_statistic": "daily_sum",
                 "time_zone": "utc+00:00",
                 "frequency": "1_hourly",
-                "year": year,
+                "year": f"{date_from.year:04d}",
                 "month": [f"{m:02d}" for m in range(date_from.month, date_to.month+1)],
                 "day": [f"{d:02d}" for d in range(1, 31+1)],
-                "area": [               # TL, BR: lat_max, lon_min, lat_min, lon_max
-                    float(area[0]),
-                    float(area[1]),
-                    float(area[2]),
-                    float(area[3]),
-                ],
+                "area": area,               # TL, BR: lat_max, lon_min, lat_min, lon_max
                 "format": "netcdf",
             },
             filename
@@ -325,10 +319,10 @@ Version notes:
 def download_mrlc_year(client, year, area, out_dir):
 
     version = MRLC_VERSION_MAP[year]
-    out_path = os.path.join(out_dir, f"ESA_LC_{year}_subset.nc")
+    out_path = os.path.join(out_dir, f"ESA_LC_{year}_subset.nc.zip")    # Provided as zip even though we request netcdf
 
-    if out_path.exists():
-        print(f"Already exists, skipping: {out_path.name}")
+    if os.path.exists(out_path):
+        print(f"Already exists, skipping: {os.path.basename(out_path)}")
         return out_path
 
     client.retrieve(
@@ -349,6 +343,9 @@ def download_mrlc_year(client, year, area, out_dir):
 
 # %% [markdown]
 # ## Load global datasets ready for matchups
+
+# %% [markdown]
+# ### SST
 
 # %%
 # # %%script false --no-raise-error     # Disables this cell
@@ -385,6 +382,9 @@ sst_da
 
 # Do we have to invert the array? 
 
+# %% [markdown]
+# ### Chl-a
+
 # %%
 # Open Chl-a global dataset, 4km daily - takes 25 mins
 # I could go for 1km data, but the other datasets are >= 4km resolution.
@@ -406,25 +406,49 @@ chl_da = env_ds[data_var]
 chl_da = chl_da.sortby('lat')
 chl_da
 
+# %% [markdown]
+# ### Rainfall
+
 # %%
 # Extract lagged rainfall data for whole UK for all dates, rather than tiny patches per sample per lag
+# Takes days due to queue on CDS
 
 print(f'\nExtracting precipitation matchups...')
 max_offset = timedelta(days=-max(lag_precip)*2)
-extract_era5_region(obs_df, cache_dir=era5_cache, daily=True, max_offset=max_offset, col_name='tp_mm_daily_region')
-
-
-# %%
-# Open rainfall data
-HERE
+extract_era5_region(obs_df, cache_dir=era5_cache, daily=True, max_offset=max_offset, col_name='tp_daily_region')
 
 # %%
-# Open ESA Land Cover-CCI  global dataset, 300m, annual
+# Open rainfall data - from our own cache
+
+env_file_patt = os.path.join (era5_cache, 'tp_daily_region', '*.nc')
+data_var = 'tp'
+
+# Estimate number of files included
+print ("Compiling list of dataset files...")
+env_file_list = glob.glob(env_file_patt)
+print (f'Env dataset contains {len(env_file_list)} files')
+
+print ('Opening multi-file env data, this may take several minutes...')
+with ProgressBar():
+    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars=[data_var])
+env_ds = env_ds.rename({'valid_time': 'time', 'latitude': 'lat', 'longitude': 'lon'})
+print(f'Variables: {list(env_ds.keys())}')
+# Convert rainfall from m to mm
+env_ds = env_ds.rename({'tp': 'tp_daily_mm'})
+tp_mm_daily_da = env_ds['tp_daily_mm'] * 1000
+tp_mm_daily_da = tp_mm_daily_da.sortby('lat')
+tp_mm_daily_da
+
+# %% [markdown]
+# ### Land cover
+
+# %%
+# Extract ESA Land Cover-CCI  global dataset, 300m, annual
 # Catalogue: https://catalogue.ceda.ac.uk/uuid/b382ebe6679d44b8b0e68ea4ef4b701c/
+# Have to accept licences on ECMWF site first.
 
 # Bounding box [North, West, South, East] in decimal degrees
-area = [obs_df['lat'].max(), obs_df['lon'].min(), obs_df['lat'].min(), obs_df['lon'].max()]
-area += [lat_pad, -lon_pad, -lat_pad, lon_pad]
+area = [obs_df['lat'].max()+lat_pad, obs_df['lon'].min()-lon_pad, obs_df['lat'].min()-lat_pad, obs_df['lon'].max()+lon_pad]
 year_range = [obs_df['time'].min().year, obs_df['time'].max().year]
 
 os.makedirs(landcov_cache, exist_ok=True)
@@ -432,9 +456,37 @@ client = cdsapi.Client()   # reads ~/.cdsapirc automatically
 
 for year in range(year_range[0], year_range[1]+1):
     print (f"Downloading year {year}...")
-    download_mrlc_year(client, area, year, landcov_cache)
+    download_mrlc_year(client, year, area, landcov_cache)
 
 print('Finished')
+
+# Takes about 60m
+# 2023-24 will become available during 2026
+
+# %%
+# Open land cover data - from our own cache
+
+# Unzip files
+for file in glob.glob(os.path.join(landcov_cache, '*.zip')):
+    print(f"Unzipping {file}...")
+    with zipfile.ZipFile(file, 'r') as zip_ref:
+        zip_ref.extractall(landcov_cache)
+
+env_file_patt = os.path.join (landcov_cache, '*.nc')
+data_var = 'lccs_class'
+
+# Estimate number of files included
+print ("Compiling list of dataset files...")
+env_file_list = glob.glob(env_file_patt)
+print (f'Env dataset contains {len(env_file_list)} files')
+
+print ('Opening multi-file env data, this may take several minutes...')
+with ProgressBar():
+    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars=[data_var])
+print(f'Variables: {list(env_ds.keys())}')
+landcov_da = env_ds[data_var]
+landcov_da = landcov_da.sortby('lat')
+landcov_da
 
 # %% [markdown]
 # ## Analysis of gastoenteritis cases (SaS)
@@ -498,8 +550,6 @@ print_df
 # %% magic_args="false --no-raise-error     # Disables this cell" language="script"
 #
 # # Uses slice for neighbourhood average, takes ~20 mins
-# lat_pad = lon_pad = 0.02  # half width of neighbourhood in degrees, so 0.02 gives ~5x5 km.
-# time_pad = pd.Timedelta(days=2)
 #
 # # You can't use nearest in time if also using a slice in coordinates, so loop through each row of observations.
 # # Then use time and coords slice. But we should not average in time.
@@ -701,33 +751,68 @@ print_df
 # %% [markdown]
 # ### Rainfall matchups
 
+# %% magic_args="false --no-raise-error     # Disables this cell, obsolete" language="script"
+#
+# # Matchup EA data with rainfall - instantaneous, so unlikely to relate
+# print('Caching and extracting matchups with ERA5 rainfall data, this may take a while...')
+# obs_df = extract_era5_matchups(obs_df, cache_dir=era5_cache) 
+# print(f'Missing values: {obs_df['tp_mm'].isnull().sum().sum() / len(obs_df):.1%}')
+
+
+# %% magic_args="false --no-raise-error     # Disables this cell, obsolete" language="script"
+#
+# # Matchup EA data with rainfall - daily sum
+# print('Caching and extracting matchups with ERA5 daily rainfall data, this may take a while...')
+# obs_df = extract_era5_matchups(obs_df, cache_dir=era5_cache, daily=True) 
+# print(f'Missing values: {obs_df["tp_mm_daily"].isnull().sum().sum() / len(obs_df):.1%}')
+
+# %% magic_args="false --no-raise-error     # Disables this cell, obsolete" language="script"
+#
+# # Matchup EA data with lagged rainfall - daily sum
+# # I think it would have been better to extract the data for whole UK for all dates, rather than tiny patches per sample per lag, 
+#
+# for lag_days in lag_precip:
+#     col_name = f'tp_mm_daily_lag_{lag_days}d'
+#
+#     # Vectorised extraction
+#     print(f'\nExtracting precipitation matchups with {lag_days} days lag..')
+#     obs_df = extract_era5_matchups(obs_df, cache_dir=era5_cache, daily=True, time_offset=timedelta(days=-lag_days), col_name=col_name)
+#     print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
+#
+#     # Store results
+#     %store obs_df
+#
+
 # %%
-# Matchup EA data with rainfall
-print('Caching and extracting matchups with ERA5 rainfall data, this may take a while...')
-obs_df = extract_era5_matchups(obs_df, cache_dir=era5_cache) 
-print(f'Missing values: {obs_df['tp_mm'].isnull().sum().sum() / len(obs_df):.1%}')
-
-
-# %%
-# Matchup EA data with rainfall - daily sum
-print('Caching and extracting matchups with ERA5 daily rainfall data, this may take a while...')
-obs_df = extract_era5_matchups(obs_df, cache_dir=era5_cache, daily=True) 
-print(f'Missing values: {obs_df["tp_mm_daily"].isnull().sum().sum() / len(obs_df):.1%}')
-
-# %%
-# Matchup EA data with lagged rainfall - daily sum
-# I think it would have been better to extract the data for whole UK for all dates, rather than tiny patches per sample per lag, 
-
-for lag_days in lag_precip:
-    col_name = f'tp_mm_daily_lag_{lag_days}d'
+# Matchup EA data with lagged rainfall - daily sum using cached UK region
+for lag_days in [0] + lag_precip:
+    if lag_days == 0:
+        col_name = 'tp_mm_daily'
+    else:
+        col_name = f'tp_mm_daily_lag_{lag_days}d'
 
     # Vectorised extraction
     print(f'\nExtracting precipitation matchups with {lag_days} days lag..')
-    obs_df = extract_era5_matchups(obs_df, cache_dir=era5_cache, daily=True, time_offset=timedelta(days=-lag_days), col_name=col_name)
-    print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
 
-    # Store results
-    # %store obs_df
+    # Build coordinate arrays aligned to the DataFrame index
+    times = xr.DataArray(pd.DatetimeIndex(obs_df['time'])+timedelta(days=-lag_days), dims="points")
+    lats  = xr.DataArray(obs_df['lat'].values, dims="points")
+    lons  = xr.DataArray(obs_df['lon'].values, dims="points")
+    
+    # Vectorised extraction
+    method = 'nearest'
+    values = tp_mm_daily_da.sel(
+        time=times,
+        lat=lats,
+        lon=lons,
+        method=method,
+    )
+    obs_df[col_name] = values
+
+    print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
+    
+# Store results
+# %store obs_df
 
 
 # %% [markdown]
@@ -746,7 +831,7 @@ method = 'nearest'
 # Chop out subscene
 print('Making subscene...')
 region_da = chl_da.sel(
-    time=slice(obs_df['time'].min() - lag_chl.max() - time_pad, obs_df['time'].max() + time_pad),
+    time=slice(obs_df['time'].min() - pd.Timedelta(days=max(lag_chl)) - time_pad, obs_df['time'].max() + time_pad),
     lat=slice(obs_df['lat'].min() - lat_pad, obs_df['lat'].max() + lat_pad),
     lon=slice(obs_df['lon'].min() - lon_pad, obs_df['lon'].max() + lon_pad),
 )
@@ -765,7 +850,7 @@ for lag_days in lag_chl: # [0] + lag_chl:
         print(f' with {lag_days} days lag', end='')
     print(', this may take a while...')
     interp_delayed = region_da.sel(
-        time=times + timedelta(days=-lag_days),
+        time=times + pd.Timedelta(days=-lag_days),
         lat=lats,
         lon=lons,
         method=method,
@@ -785,11 +870,38 @@ print(f'Selected columns:')
 print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
 print_df
 
+# Missing values: 90.6, 90.6, 90.1, 90.3... so if they ALL need to be valid per sample then we end up with only n=30!
+
 # %% [markdown]
 # ### Land cover matchups
 
 # %%
-# Matchup EA data with land cover
+# Matchup EA data with land cover - using cached UK region
+# NB NEED TO SUMMARISE closest coastal types, especially if point is on water
+col_name = f'land_cov'
+
+# Vectorised extraction
+print(f'\nExtracting land cover matchups..')
+
+# Build coordinate arrays aligned to the DataFrame index
+times = xr.DataArray(pd.DatetimeIndex(obs_df['time']), dims="points")
+lats  = xr.DataArray(obs_df['lat'].values, dims="points")
+lons  = xr.DataArray(obs_df['lon'].values, dims="points")
+
+# Vectorised extraction
+method = 'nearest'
+values = landcov_da.sel(
+    time=times,
+    lat=lats,
+    lon=lons,
+    method=method,
+)
+obs_df[col_name] = values
+
+print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
+
+# Store results
+# %store obs_df
 
 # %%
 # Abritrary threshold of EA E coli data for plotting test
@@ -895,8 +1007,8 @@ print(out_df)
 # Random Forest to predict E coli given SST and ...
 
 # Remove invalid rows, with missing SST or E coli count
-lag_names = [f'{v}_lag_{d}d' for v, d in itertools.product(['sst'], lag_precip)]
-feature_names = ['sst', 'tp_mm_daily', 'chl'] + lag_names
+lag_names = [f'{v}_lag_{d}d' for v, d in itertools.product(['sst', 'tp_mm_daily'], lag_precip)]
+feature_names = ['sst', 'tp_mm_daily', 'chl', 'land_cov'] + lag_names
 # feature_names = ['sst', 'tp_mm_daily', 'chl']
 # feature_names = ['sst', 'tp_mm_daily', 'chl', 'tp_mm_daily_lag_7d'] + [f'{v}_lag_{d}d' for v, d in itertools.product(['tp_mm_daily'], lag_precip)]
 # feature_names = ['tp_mm_daily']
@@ -956,7 +1068,7 @@ print(f'Mean Absolute Error on test set: {mae:.3f}')
 
 # %%
 # Store variables so we don't have to regenerate them
-# %store obs_df obs_filtered_df sst_da chl_da
+# %store obs_df obs_filtered_df sst_da chl_da tp_mm_daily_da landcov_da
 
 # %%
 # Restore all variables from store
