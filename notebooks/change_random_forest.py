@@ -49,6 +49,7 @@ from sklearn.ensemble import RandomForestClassifier
 from datetime import timedelta
 import itertools
 import zipfile
+from scipy.ndimage import distance_transform_edt
 
 # Import PML packages
 # sys.path.append("/users/rsg/anla/code/satellite/match-maker/")
@@ -339,6 +340,18 @@ def download_mrlc_year(client, year, area, out_dir):
 
     return out_path
 
+
+
+# %%
+# Can probably add a distance tolerance to this if I return distances from transform.
+
+def fill_nearest(da):
+    """Replace NaNs with the value of the nearest non-NaN cell. Used for matchups with da.sel"""
+    mask = np.isnan(da.values)
+    # distance_transform_edt returns indices of nearest non-NaN for each NaN cell
+    _, nearest_idx = distance_transform_edt(mask, return_indices=True)
+    filled = da.values[tuple(nearest_idx)]
+    return xr.DataArray(filled, coords=da.coords, dims=da.dims)
 
 
 # %% [markdown]
@@ -737,7 +750,7 @@ print_df
 #             lat=slice(row['lat'] - lat_pad, row['lat'] + lat_pad),
 #             lon=slice(row['lon'] - lon_pad, row['lon'] + lon_pad),
 #         )
-#         row['sst'] = float(nhood.mean())
+#         row['sst'] = float(nhood.mean())    # NB this doesn't work, need to use .loc index thing.
 #
 # print(f'Missing values: {obs_df['sst'].isnull().sum().sum() / len(obs_df):.1%}')
 #
@@ -875,7 +888,7 @@ print_df
 
 # %%
 # Matchup EA data with land cover - using cached UK region
-# NB NEED TO SUMMARISE closest coastal types, especially if point is on water
+# NB This will include points with water class, not useful.
 col_name = f'land_cov'
 
 # Vectorised extraction
@@ -900,6 +913,51 @@ print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%
 
 # Store results
 # %store obs_df
+
+# %%
+# Matchup EA data with land cover - using cached UK region - find closest non-water class
+col_name = f'land_cov_near'
+
+# Set water classes to missing, then the matchup will find coastal class instead
+class_water = 210
+landcov_near_da = landcov_da.where(landcov_da != class_water)
+
+# Vectorised extraction
+print(f'\nExtracting land cover matchups..')
+obs_df[col_name] = obs_df['land_cov']
+
+# Loop through each year group of observations
+for year, group in obs_df.groupby(obs_df["time"].dt.year):
+    print(f"\n{pd.to_datetime(pd.Timestamp.now()).strftime('%H:%M:%S')} Processing {year}... (n={len(group)})")
+
+    # Extract the land cover map for this year
+    land_year = landcov_near_da.sel(time=landcov_da.time.dt.year.isin(year))
+    if land_year.time.size == 0:
+        print(f'   No land cover data')
+        continue
+    land_year = land_year.squeeze('time', drop=True)
+    land_year = fill_nearest(land_year)     # Fill missing values with nearest non-missing neighbour
+    
+    # Build coordinate arrays aligned to the DataFrame index
+    lats  = xr.DataArray(group['lat'].values, dims="points")
+    lons  = xr.DataArray(group['lon'].values, dims="points")
+    method = 'nearest'
+    values = land_year.sel(
+        lat=lats,
+        lon=lons,
+        method=method,
+    )
+    obs_df.loc[group.index, col_name] = values.values      # Clever way to write group values to parent dataframe
+
+print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
+
+# Store results
+# # %store obs_df
+
+# Missing 50.1% - 'sel' is not finding nearby valid points if target coord is missing, why?
+# Just cannot get this to do what I think it should do. Crashes kernel.
+# 'sel' finds the nearest coordinate position, not the nearest non-missing value - very confusing.
+# Finally found answer in distance transform fill_nearest. 
 
 # %%
 # Abritrary threshold of EA E coli data for plotting test
@@ -1006,7 +1064,7 @@ print(out_df)
 
 # Remove invalid rows, with missing SST or E coli count
 lag_names = [f'{v}_lag_{d}d' for v, d in itertools.product(['sst', 'tp_mm_daily'], lag_precip)]
-feature_names = ['sst', 'tp_mm_daily', 'chl', 'land_cov'] + lag_names
+feature_names = ['sst', 'tp_mm_daily', 'chl', 'land_cov_near'] + lag_names
 # feature_names = ['sst', 'tp_mm_daily', 'chl']
 # feature_names = ['sst', 'tp_mm_daily', 'chl', 'tp_mm_daily_lag_7d'] + [f'{v}_lag_{d}d' for v, d in itertools.product(['tp_mm_daily'], lag_precip)]
 # feature_names = ['tp_mm_daily']
