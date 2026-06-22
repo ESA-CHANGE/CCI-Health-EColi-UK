@@ -13,11 +13,16 @@ Oct. 2025 to Sep. 2028.
   - [x] Rainfall - instantaneous
   - [x] Rainfall - daily average
   - [x] Chl-a
-  - [ ] Land use
-  - [ ] Time lags
+  - [x] SST
+  - [x] Land use
+  - [x] Time lags
+  - [ ] Marine heatwave category
 - [x] Calculate lat/lon coords for EA UKNG coords.
 - [x] Try matchup using EA E coli data.
 - [x] Dave re sample code for Random Forest.
+- [ ] Try E coli category classification rather than regression.
+- [ ] Optuna setup for fiddling with parameters.
+- [ ] Sk-learn functions for feature selection.
 
 
 ## Installation
@@ -95,3 +100,8 @@ If we had got the Zarr dataset working, perhaps we could have extracted the whol
 
 ## CDS processing issues
 - See your jobs in queue at: https://cds.climate.copernicus.eu/requests?tab=all
+
+## Handling environmental datasets
+
+### Land cover
+- [Visualise LCCS map](https://climate.esa.int/de/projekte/land-cover/notebook-lc/)

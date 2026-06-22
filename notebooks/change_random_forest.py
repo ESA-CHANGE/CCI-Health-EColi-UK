@@ -345,13 +345,40 @@ def download_mrlc_year(client, year, area, out_dir):
 # %%
 # Can probably add a distance tolerance to this if I return distances from transform.
 
-def fill_nearest(da):
-    """Replace NaNs with the value of the nearest non-NaN cell. Used for matchups with da.sel"""
+def fill_nearest(da, max_distance=None):
+    """
+    Replace NaNs with the value of the nearest non-NaN cell.
+
+    Parameters
+    ----------
+    da : xr.DataArray
+        2D array with possible NaN values.
+    max_distance : float or None
+        Maximum distance (in grid cells) to search for a valid neighbour.
+        NaN cells farther than this from any valid cell remain NaN.
+        If None, all NaNs are filled regardless of distance.
+
+    Returns
+    -------
+    xr.DataArray
+        Array with NaNs replaced where a valid neighbour exists within
+        max_distance grid cells (or everywhere if max_distance is None).
+    """
     mask = np.isnan(da.values)
-    # distance_transform_edt returns indices of nearest non-NaN for each NaN cell
-    _, nearest_idx = distance_transform_edt(mask, return_indices=True)
-    filled = da.values[tuple(nearest_idx)]
-    return xr.DataArray(filled, coords=da.coords, dims=da.dims)
+
+    if not mask.any():
+        return da.copy()
+
+    distances, nearest_idx = distance_transform_edt(mask, return_indices=True)
+    filled_values = da.values[tuple(nearest_idx)]
+
+    if max_distance is not None:
+        # Keep original NaN where the nearest valid cell is too far away
+        too_far = mask & (distances > max_distance)
+        filled_values[too_far] = np.nan
+
+    return xr.DataArray(filled_values, coords=da.coords, dims=da.dims,
+                        attrs=da.attrs)
 
 
 # %% [markdown]
@@ -792,7 +819,6 @@ print_df
 #
 #     # Store results
 #     %store obs_df
-#
 
 # %%
 # Matchup EA data with lagged rainfall - daily sum using cached UK region
@@ -831,7 +857,7 @@ for lag_days in [0] + lag_precip:
 
 # %%
 # Match-up EA E coli with chl-a data - vectorised (~? mins)
-# Missing values: ??
+# Missing values: 90%!
 
 # Build coordinate arrays aligned to the DataFrame index
 times = xr.DataArray(pd.DatetimeIndex(obs_df['time']), dims="points")
@@ -882,6 +908,75 @@ print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
 print_df
 
 # Missing values: 90.6, 90.6, 90.1, 90.3... so if they ALL need to be valid per sample then we end up with only n=30!
+
+# %%
+# Match-up EA E coli with chl-a data - vectorised (~? mins)
+# If missing, it will take the nearest value within NxN neighbourhood.
+# This reduced missing values from 90% to 48%, that seems acceptable now, with genuine gaps due to cloud.
+
+chl_max_offset = 5      # pixels (e.g. 5x4=20 km) allowed away from sample location, to handle cloudy/coast missing data
+method = 'nearest'
+
+# Chop out subscene
+print('Making subscene...')
+region_da = chl_da.sel(
+    time=slice(obs_df['time'].min() - pd.Timedelta(days=max(lag_chl)) - time_pad, obs_df['time'].max() + time_pad),
+    lat=slice(obs_df['lat'].min() - lat_pad, obs_df['lat'].max() + lat_pad),
+    lon=slice(obs_df['lon'].min() - lon_pad, obs_df['lon'].max() + lon_pad),
+)
+
+# Loop through time lags for chl-a, including no lag
+for lag_days in [0] + lag_chl:
+    if lag_days == 0:
+        col_name = 'chl'
+    else:
+        col_name = f'chl_lag_{lag_days}d'
+
+    obs_df[col_name] = np.nan
+    time_lagged = obs_df["time"] + pd.Timedelta(days=-lag_days)
+
+    print('\nExtracting matchups from dataset', end='')
+    if lag_days != 0:
+        print(f' with {lag_days} days lag', end='')
+    print(', this may take a while...')
+
+    # Group by date so we can use fill_nearest
+    for date, group in obs_df.groupby(time_lagged.dt.date):
+
+        print(f'{date}', end=', ')
+        day_da = region_da.sel(time=region_da.time.dt.date.isin(date))
+        if day_da.time.size == 0:
+            print(f'\n   No env data for {date}')
+            continue
+
+        day_da = day_da.squeeze('time', drop=True)
+        day_da = fill_nearest(day_da, max_distance=chl_max_offset)     # Fill missing values with nearest non-missing neighbour
+
+        # Build coordinate arrays aligned to the DataFrame index
+        # times = xr.DataArray(pd.DatetimeIndex(obs_df['time']), dims="points")
+        lats  = xr.DataArray(group['lat'].values, dims="points")
+        lons  = xr.DataArray(group['lon'].values, dims="points")
+
+        # Vectorised extraction     
+        values = day_da.sel(
+            lat=lats,
+            lon=lons,
+            method=method,
+        )
+        obs_df.loc[group.index, col_name] = values.values
+
+    print('\n')     # End date line
+    print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
+
+# Store results
+# %store obs_df
+
+# Just show selected columns
+print(f'Selected columns:')
+print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
+print_df
+
+# Missing values: 
 
 # %% [markdown]
 # ### Land cover matchups
