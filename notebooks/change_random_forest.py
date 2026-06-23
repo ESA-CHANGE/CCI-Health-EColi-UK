@@ -50,6 +50,11 @@ from datetime import timedelta
 import itertools
 import zipfile
 from scipy.ndimage import distance_transform_edt
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+import re
+import subprocess
 
 # Import PML packages
 # sys.path.append("/users/rsg/anla/code/satellite/match-maker/")
@@ -57,10 +62,13 @@ from scipy.ndimage import distance_transform_edt
 
 # Constants
 KELVIN_TO_CELSIUS = -273.15
+MRLC_VERSION_MAP = {year: "v2_0_7cds" if year <= 2015 else "v2_1_1"
+            for year in range(1992, 2030)}
 
 plots_root = '/data/datasets/Projects/CHANGE/data/outputs/plots'
 era5_cache = '/data/datasets/Projects/CHANGE/data/cache/era5'
 landcov_cache = '/data/datasets/Projects/CHANGE/data/cache/landcov'
+mhw_cache = '/data/datasets/Projects/CHANGE/data/cache/noaa_mhw'
 
 # Initialisation
 os.makedirs(plots_root, exist_ok=True)
@@ -75,9 +83,9 @@ lag_precip = [1, 2, 4, 7]
 lag_sst = lag_precip
 lag_chl = lag_precip
 
-MRLC_VERSION_MAP = {year: "v2_0_7cds" if year <= 2015 else "v2_1_1"
-            for year in range(1992, 2030)}
-
+# Restore all variables from store
+# %store -r
+# %store
 
 # %% [markdown]
 # ### Function definitions
@@ -303,9 +311,6 @@ def extract_era5_region(df, cache_dir="/tmp/change/era5_cache", buffer=0.25, dai
                 continue
     
     return results
-
-
-# %%
 """
 Download a regional subset of ESA CCI Land Cover v2.1.1 from Copernicus CDS
 using server-side spatial subsetting via the 'area' parameter.
@@ -341,8 +346,6 @@ def download_mrlc_year(client, year, area, out_dir):
     return out_path
 
 
-
-# %%
 # Can probably add a distance tolerance to this if I return distances from transform.
 
 def fill_nearest(da, max_distance=None):
@@ -379,6 +382,51 @@ def fill_nearest(da, max_distance=None):
 
     return xr.DataArray(filled_values, coords=da.coords, dims=da.dims,
                         attrs=da.attrs)
+def list_remote_files(url, extension=None, verbose=True, level=0, max_level=999):
+    """
+    Recursively list files on an Apache/nginx-style directory listing page.
+
+    Args:
+        url:       Base URL of the directory (trailing slash optional)
+        extension: Optional filter, e.g. '.nc', '.csv'
+        verbose:   Print each directory as it's scanned
+        level:     Keep track of recursion
+        max_level: Maximum level of directory tree
+
+    Returns:
+        List of full URLs to matching files.
+    """
+    if not url.endswith("/"):
+        url += "/"
+
+    if verbose:
+        print(f"Scanning: {url}")
+
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    files = []
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        # Skip parent-directory links and query strings
+        if href.startswith("?") or href.startswith("/") or href == "../":
+            continue
+
+        # Only allow links within same tree
+        if href.startswith("http") and not url in href:
+            continue
+
+        full_url = urljoin(url, href)
+
+        if href.endswith("/") and level < max_level:
+            # It's a subdirectory — recurse
+            files.extend(list_remote_files(full_url, extension=extension, verbose=verbose, level=level+1, max_level=max_level))
+        elif extension is None or href.endswith(extension):
+            files.append(full_url)
+
+    return files
 
 
 # %% [markdown]
@@ -421,6 +469,132 @@ sst_da = env_ds['analysed_sst'] + KELVIN_TO_CELSIUS
 sst_da
 
 # Do we have to invert the array? 
+
+# %% [markdown]
+# ### Marine heatwave
+
+# %%
+# Download MHW dataset into cache, because there's no THREDDS server
+# If I'd known that, I could have omitted list_remote_files and just use wget --accept-regex.
+# Currently loading all of 2010s and 2020s, even though it only really needs May-Sep.
+env_file_url = 'https://www.star.nesdis.noaa.gov/pub/socd/mecb/crw/data/marine_heatwave/v1.0.1/category/nc/'
+env_file_regex = '.*/20[12]\\d/.*\\.nc'
+
+print ("Compiling list of dataset files...")
+all_files = list_remote_files(env_file_url, extension=".nc", max_level=1)   # Find all files on website
+r = re.compile(env_file_regex)
+env_file_list = list(filter(r.match, all_files))   # Subset to the ones we want
+print (f'Env dataset contains {len(env_file_list)} files')
+
+# Write list to temp file
+list_file = '/tmp/mhw_files.txt'
+with open(list_file, 'w') as f:
+    for line in env_file_list:
+        f.write(f"{line}\n")
+
+# Use wget to download all the MHW files into year directories
+subprocess.run(["wget", '--no-verbose', '--no-clobber', 
+                '--directory-prefix='+mhw_cache, '--force-directories', '--no-host-directories', '--cut-dirs=9',
+                '--input-file='+list_file])
+
+# Use wget to download all the MHW files into year directories using recursive search, not working
+# subprocess.run(["wget", '--verbose', '--no-clobber', 
+#                 '--directory-prefix='+mhw_cache, '--force-directories', '--no-host-directories', '--cut-dirs=9',
+#                 '--recursive', '-levels=2', env_file_url, '-erobots=off', '--accept-regex='+env_file_regex])
+
+# %%
+# Correct coordinates and subscene
+# The transition to lat/lon dims happens at 01 Jul. 2024
+# Perhaps the dimensions were OK anyway?
+def rename_dims(ds):
+    global obs_df
+    if "latdim" in ds.dims and "londim" in ds.dims:
+        ds = ds.assign_coords(
+            lat=ds["lat"],
+            lon=ds["lon"]
+        ).swap_dims({"latdim": "lat", "londim": "lon"})
+        # da = ds['heatwave_category']
+        # da = da.where(da >= 0, other=251)
+        # ds = ds.assign(heatwave_category=da)    # Don't think this works.
+        # new_vars = {}
+        # for v in ds.data_vars:
+        #     if ds[v].dtype == "int8":
+        #         da = ds[v]
+        #         data = da.astype("uint8")
+        #         data = data.fillna(251)
+        #         data = data.where(da >= 0, other=251)
+        #         new_vars[v] = data
+        # ds = ds.assign(new_vars) if new_vars else ds
+    # Would be clever to check for 1st Jan then print
+    if ds.time[0].dt.month == 1 and ds.time[0].dt.day == 1:
+        print(f'{ds.time[0].values}')
+
+    # Subscene to roi to avoid memory errors, should probably drop variables too.
+    ds = ds.sel(
+        lat=slice(obs_df['lat'].min() - lat_pad, obs_df['lat'].max() + lat_pad),
+        lon=slice(obs_df['lon'].min() - lon_pad, obs_df['lon'].max() + lon_pad),
+    )
+    return ds
+
+
+# %%
+# Load the MHW files into Xarray
+env_file_list_cache = os.path.join(mhw_cache, '????', '*mhw*.nc')
+
+print ('Opening multi-file env data, this may take several minutes...')
+with ProgressBar():
+    env_ds = xr.open_mfdataset(env_file_list_cache, combine='by_coords', data_vars=['heatwave_category'], preprocess=rename_dims)
+
+print ('Done')
+
+print(f'Variables: {list(env_ds.keys())}')
+
+mhw_da = env_ds['heatwave_category']
+mhw_da
+
+# %store mhw_da
+# Takes 25m
+
+# %%
+# Fill gaps in MHW map for easier matchups
+# Just does each yearly span to save a lot of time. 
+# Oops should have used concat to avoid time gaps and reduce size of 3D array. Retain time dimension in sel.
+mhw_max_offset = 5
+mhw_da = mhw_da.sel(
+    time=slice(obs_df['time'].min() - pd.Timedelta(days=max(lag_sst)) - time_pad, obs_df['time'].max() + time_pad)
+)
+
+mhw_fill_da = xr.full_like(mhw_da, fill_value=np.nan)
+
+# Loop through years
+for year, ygroup in obs_df.groupby(obs_df["time"].dt.year):
+    year_span = [ygroup.time.min().date(), ygroup.time.max().date()]
+    year_span[0] = year_span[0] - pd.Timedelta(days=max(lag_sst))
+    year_times = mhw_da.sel(time=slice(year_span[0], year_span[1])).time.values
+
+    print(f"\n{pd.to_datetime(pd.Timestamp.now()).strftime('%H:%M:%S')} Processing {year}, spanning {year_span[0]} to {year_span[1]}...")
+
+    # Loop through each time slice and fill missing values with nearest neighbour
+    for time in year_times:
+
+        print(f'{pd.Timestamp(time).strftime("%Y-%m-%d")}', end=', ')
+        day_da = mhw_da.sel(time=time)
+        if day_da.time.size == 0:
+            print(f'\n   No env data for {time}')
+            continue
+
+        day_da = fill_nearest(day_da, max_distance=mhw_max_offset)     # Fill missing values with nearest non-missing neighbour
+
+        # Write filled slice back into the copy
+        mhw_fill_da.loc[dict(time=time)] = day_da.values
+    print()
+
+# %store mhw_fill_da
+mhw_fill_da
+
+# Takes 120m
+# Invalid value in cast at 01/07/2024 - bad fill attribute?
+
 
 # %% [markdown]
 # ### Chl-a
@@ -787,6 +961,40 @@ print_df
 # print_df
 
 # %% [markdown]
+# ### Marine heatwave matchups
+
+# %%
+# Match-up EA E coli with MHW data - vectorised
+for lag_days in [0] + lag_sst:
+    if lag_days == 0:
+        col_name = 'mhw'
+    else:
+        col_name = f'mhw_lag_{lag_days}d'
+
+    # Vectorised extraction
+    print(f'\nExtracting MHW matchups with {lag_days} days lag..')
+
+    # Build coordinate arrays aligned to the DataFrame index
+    times = xr.DataArray(pd.DatetimeIndex(obs_df['time'])+timedelta(days=-lag_days), dims="points")
+    lats  = xr.DataArray(obs_df['lat'].values, dims="points")
+    lons  = xr.DataArray(obs_df['lon'].values, dims="points")
+    
+    # Vectorised extraction
+    method = 'nearest'
+    values = mhw_fill_da.sel(
+        time=times,
+        lat=lats,
+        lon=lons,
+        method=method,
+    )
+    obs_df[col_name] = values
+
+    print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
+
+# Missing: was 19.4%, so reran using mhw_fill_da after fill_gaps: missing 0%.
+# Takes 22m
+
+# %% [markdown]
 # ### Rainfall matchups
 
 # %% magic_args="false --no-raise-error     # Disables this cell, obsolete" language="script"
@@ -855,59 +1063,60 @@ for lag_days in [0] + lag_precip:
 # %% [markdown]
 # ### Chl-a matchups
 
-# %%
-# Match-up EA E coli with chl-a data - vectorised (~? mins)
-# Missing values: 90%!
-
-# Build coordinate arrays aligned to the DataFrame index
-times = xr.DataArray(pd.DatetimeIndex(obs_df['time']), dims="points")
-lats  = xr.DataArray(obs_df['lat'].values, dims="points")
-lons  = xr.DataArray(obs_df['lon'].values, dims="points")
-method = 'nearest'
-
-# Chop out subscene
-print('Making subscene...')
-region_da = chl_da.sel(
-    time=slice(obs_df['time'].min() - pd.Timedelta(days=max(lag_chl)) - time_pad, obs_df['time'].max() + time_pad),
-    lat=slice(obs_df['lat'].min() - lat_pad, obs_df['lat'].max() + lat_pad),
-    lon=slice(obs_df['lon'].min() - lon_pad, obs_df['lon'].max() + lon_pad),
-)
-
-# Loop through time lags for chl-a, including no lag
-for lag_days in lag_chl: # [0] + lag_chl:
-    if lag_days == 0:
-        col_name = 'chl'
-    else:
-        col_name = f'chl_lag_{lag_days}d'
-
-    # Vectorised extraction
-    # Dask delayed run to enable use of progress bar
-    print('Extracting matchups from dataset', end='')
-    if lag_days != 0:
-        print(f' with {lag_days} days lag', end='')
-    print(', this may take a while...')
-    interp_delayed = region_da.sel(
-        time=times + pd.Timedelta(days=-lag_days),
-        lat=lats,
-        lon=lons,
-        method=method,
-    ).load(compute=False)
-    with ProgressBar():
-        values = interp_delayed.compute()
-
-    obs_df[col_name] = values
-
-    print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
-
-# Store results
+# %% magic_args="false --no-raise-error     # Disables this cell, superceded" language="script"
+#
+# # Match-up EA E coli with chl-a data - vectorised (~? mins)
+# # Missing values: 90%! as 'sel' always takes nearest cell, not nearest valid data.
+#
+# # Build coordinate arrays aligned to the DataFrame index
+# times = xr.DataArray(pd.DatetimeIndex(obs_df['time']), dims="points")
+# lats  = xr.DataArray(obs_df['lat'].values, dims="points")
+# lons  = xr.DataArray(obs_df['lon'].values, dims="points")
+# method = 'nearest'
+#
+# # Chop out subscene
+# print('Making subscene...')
+# chl_region_da = chl_da.sel(
+#     time=slice(obs_df['time'].min() - pd.Timedelta(days=max(lag_chl)) - time_pad, obs_df['time'].max() + time_pad),
+#     lat=slice(obs_df['lat'].min() - lat_pad, obs_df['lat'].max() + lat_pad),
+#     lon=slice(obs_df['lon'].min() - lon_pad, obs_df['lon'].max() + lon_pad),
+# )
+#
+# # Loop through time lags for chl-a, including no lag
+# for lag_days in lag_chl: # [0] + lag_chl:
+#     if lag_days == 0:
+#         col_name = 'chl'
+#     else:
+#         col_name = f'chl_lag_{lag_days}d'
+#
+#     # Vectorised extraction
+#     # Dask delayed run to enable use of progress bar
+#     print('Extracting matchups from dataset', end='')
+#     if lag_days != 0:
+#         print(f' with {lag_days} days lag', end='')
+#     print(', this may take a while...')
+#     interp_delayed = chl_region_da.sel(
+#         time=times + pd.Timedelta(days=-lag_days),
+#         lat=lats,
+#         lon=lons,
+#         method=method,
+#     ).load(compute=False)
+#     with ProgressBar():
+#         values = interp_delayed.compute()
+#
+#     obs_df[col_name] = values
+#
+#     print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
+#
+# # Store results
 # %store obs_df
-
-# Just show selected columns
-print(f'Selected columns:')
-print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
-print_df
-
-# Missing values: 90.6, 90.6, 90.1, 90.3... so if they ALL need to be valid per sample then we end up with only n=30!
+#
+# # Just show selected columns
+# print(f'Selected columns:')
+# print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
+# print_df
+#
+# # Missing values: 90.6, 90.6, 90.1, 90.3... so if they ALL need to be valid per sample then we end up with only n=30!
 
 # %%
 # Match-up EA E coli with chl-a data - vectorised (~? mins)
@@ -919,7 +1128,7 @@ method = 'nearest'
 
 # Chop out subscene
 print('Making subscene...')
-region_da = chl_da.sel(
+chl_region_da = chl_da.sel(
     time=slice(obs_df['time'].min() - pd.Timedelta(days=max(lag_chl)) - time_pad, obs_df['time'].max() + time_pad),
     lat=slice(obs_df['lat'].min() - lat_pad, obs_df['lat'].max() + lat_pad),
     lon=slice(obs_df['lon'].min() - lon_pad, obs_df['lon'].max() + lon_pad),
@@ -944,7 +1153,7 @@ for lag_days in [0] + lag_chl:
     for date, group in obs_df.groupby(time_lagged.dt.date):
 
         print(f'{date}', end=', ')
-        day_da = region_da.sel(time=region_da.time.dt.date.isin(date))
+        day_da = chl_region_da.sel(time=chl_region_da.time.dt.date.isin(date))
         if day_da.time.size == 0:
             print(f'\n   No env data for {date}')
             continue
@@ -976,7 +1185,7 @@ print(f'Selected columns:')
 print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
 print_df
 
-# Missing values: 
+# Missing values: 48.5%, ...
 
 # %% [markdown]
 # ### Land cover matchups
@@ -1158,8 +1367,8 @@ print(out_df)
 # Random Forest to predict E coli given SST and ...
 
 # Remove invalid rows, with missing SST or E coli count
-lag_names = [f'{v}_lag_{d}d' for v, d in itertools.product(['sst', 'tp_mm_daily'], lag_precip)]
-feature_names = ['sst', 'tp_mm_daily', 'chl', 'land_cov_near'] + lag_names
+lag_names = [f'{v}_lag_{d}d' for v, d in itertools.product(['sst', 'tp_mm_daily', 'mhw'], lag_precip)]
+feature_names = ['sst', 'tp_mm_daily', 'chl', 'land_cov_near', 'mhw'] + lag_names
 # feature_names = ['sst', 'tp_mm_daily', 'chl']
 # feature_names = ['sst', 'tp_mm_daily', 'chl', 'tp_mm_daily_lag_7d'] + [f'{v}_lag_{d}d' for v, d in itertools.product(['tp_mm_daily'], lag_precip)]
 # feature_names = ['tp_mm_daily']
@@ -1219,7 +1428,7 @@ print(f'Mean Absolute Error on test set: {mae:.3f}')
 
 # %%
 # Store variables so we don't have to regenerate them
-# %store obs_df obs_filtered_df sst_da chl_da tp_mm_daily_da landcov_da
+# %store obs_df obs_filtered_df sst_da chl_da tp_mm_daily_da landcov_da mhw_fill_da
 
 # %%
 # Restore all variables from store
@@ -1234,3 +1443,10 @@ plt.scatter(obs_df['tp_mm_daily_lag_7d'], obs_df['tp_mm_daily'], alpha=0.1)
 
 times_df = tp_mm_daily_da['time'].values
 point = tp_mm_daily_da
+
+# %%
+# Once checked
+# %store -d mhw_da
+
+# %%
+mhw_fill_da
