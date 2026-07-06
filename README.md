@@ -9,20 +9,23 @@ Oct. 2025 to Sep. 2028.
 ## To do list
 - [ ] How to use SAS gastro data when they are all positive cases? I guess negatives are other regions for same dates?
 - [ ] Try CCI matchup code, or Angus's.
-- [ ] Add more env vars: 
+- [x] Add more env vars: 
   - [x] Rainfall - instantaneous
   - [x] Rainfall - daily average
   - [x] Chl-a
   - [x] SST
   - [x] Land use
   - [x] Time lags
-  - [ ] Marine heatwave category
+  - [x] Marine heatwave category
 - [x] Calculate lat/lon coords for EA UKNG coords.
 - [x] Try matchup using EA E coli data.
 - [x] Dave re sample code for Random Forest.
-- [ ] Try E coli category classification rather than regression.
+- [ ] Try E coli category classification rather than regression (<, =, >)
 - [ ] Optuna setup for fiddling with parameters.
 - [ ] Sk-learn functions for feature selection.
+- [x] Many MHW values are -9e18 but not missing, investigate.
+- [ ] Try IE category classification.
+
 
 
 ## Installation
@@ -96,7 +99,7 @@ If we had got the Zarr dataset working, perhaps we could have extracted the whol
 ## Optimising feature selection
 - Why are single features higher r^2 than several combined?
 - Macarena recommended [Optuna - A hyperparameter optimization framework](https://optuna.org/) and helpful [Random Forest optimisation tutorial](https://medium.com/@ehsannabatchian/optimizing-random-forest-models-a-deep-dive-into-hyperparameter-tuning-with-optuna-b8e4fe7f3670).
-
+- Here's a readable post on optimising: [How do I improve the performance of my Random Forest model on Databricks?](https://community.databricks.com/t5/machine-learning/how-do-i-improve-the-performance-of-my-random-forest-model-on/td-p/142507)
 
 ## CDS processing issues
 - See your jobs in queue at: https://cds.climate.copernicus.eu/requests?tab=all

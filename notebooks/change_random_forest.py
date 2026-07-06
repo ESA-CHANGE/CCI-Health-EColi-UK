@@ -466,7 +466,7 @@ print ('Done')
 
 print(f'Variables: {list(env_ds.keys())}')
 sst_da = env_ds['analysed_sst'] + KELVIN_TO_CELSIUS
-sst_da
+display(sst_da)
 
 # Do we have to invert the array? 
 
@@ -534,6 +534,8 @@ def rename_dims(ds):
         lat=slice(obs_df['lat'].min() - lat_pad, obs_df['lat'].max() + lat_pad),
         lon=slice(obs_df['lon'].min() - lon_pad, obs_df['lon'].max() + lon_pad),
     )
+    #  Fix strange buggy data -9e18; set anything very negative to missing.
+    ds = ds.where(ds["heatwave_category"] > -100)
     return ds
 
 
@@ -542,15 +544,16 @@ def rename_dims(ds):
 env_file_list_cache = os.path.join(mhw_cache, '????', '*mhw*.nc')
 
 print ('Opening multi-file env data, this may take several minutes...')
-with ProgressBar():
-    env_ds = xr.open_mfdataset(env_file_list_cache, combine='by_coords', data_vars=['heatwave_category'], preprocess=rename_dims)
+# Progress bar shows 100% for every day, useless. Probably due to preprocess script.
+#with ProgressBar():
+env_ds = xr.open_mfdataset(env_file_list_cache, combine='by_coords', data_vars=['heatwave_category'], preprocess=rename_dims)
 
 print ('Done')
 
 print(f'Variables: {list(env_ds.keys())}')
 
 mhw_da = env_ds['heatwave_category']
-mhw_da
+display(mhw_da)
 
 # %store mhw_da
 # Takes 25m
@@ -594,6 +597,7 @@ mhw_fill_da
 
 # Takes 120m
 # Invalid value in cast at 01/07/2024 - bad fill attribute?
+# NB Many values are -9e18, but not missing, see Data Wrangler, needs to be fixed. Hacked, believe these are fill values but don't know why happening.
 
 
 # %% [markdown]
@@ -618,7 +622,7 @@ env_ds = env_ds.chunk(time=30)
 print(f'Variables: {list(env_ds.keys())}')
 chl_da = env_ds[data_var]
 chl_da = chl_da.sortby('lat')
-chl_da
+display(chl_da)
 
 # %% [markdown]
 # ### Rainfall
@@ -650,7 +654,7 @@ print(f'Variables: {list(env_ds.keys())}')
 # Convert rainfall from m to mm
 tp_mm_daily_da = (env_ds['tp'] * 1000).rename('tp_daily_mm')
 tp_mm_daily_da = tp_mm_daily_da.sortby('lat')
-tp_mm_daily_da
+display(tp_mm_daily_da)
 
 # %% [markdown]
 # ### Land cover
@@ -698,7 +702,7 @@ env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars=[data_v
 print(f'Variables: {list(env_ds.keys())}')
 landcov_da = env_ds[data_var]
 landcov_da = landcov_da.sortby('lat')
-landcov_da
+display(landcov_da)
 
 # %% [markdown]
 # ## Analysis of gastoenteritis cases (SaS)
@@ -1366,9 +1370,10 @@ print(out_df)
 # %%
 # Random Forest to predict E coli given SST and ...
 
-# Remove invalid rows, with missing SST or E coli count
-lag_names = [f'{v}_lag_{d}d' for v, d in itertools.product(['sst', 'tp_mm_daily', 'mhw'], lag_precip)]
-feature_names = ['sst', 'tp_mm_daily', 'chl', 'land_cov_near', 'mhw'] + lag_names
+# Get the features and lagged versions in a sensible order
+lag_names = [f'{v}_lag_{d}d' for v, d in itertools.product(['sst', 'tp_mm_daily', 'mhw'], [0] + lag_precip)]
+feature_names = [s.replace('_lag_0d', '') for s in lag_names] + ['chl']
+# feature_names = ['sst', 'tp_mm_daily', 'chl', 'land_cov_near', 'mhw'] + lag_names
 # feature_names = ['sst', 'tp_mm_daily', 'chl']
 # feature_names = ['sst', 'tp_mm_daily', 'chl', 'tp_mm_daily_lag_7d'] + [f'{v}_lag_{d}d' for v, d in itertools.product(['tp_mm_daily'], lag_precip)]
 # feature_names = ['tp_mm_daily']
@@ -1449,4 +1454,8 @@ point = tp_mm_daily_da
 # %store -d mhw_da
 
 # %%
-mhw_fill_da
+display(mhw_da)
+piece = mhw_da.sel(time=slice("2025-06-19", "2025-06-20"))
+
+# %%
+# %store
