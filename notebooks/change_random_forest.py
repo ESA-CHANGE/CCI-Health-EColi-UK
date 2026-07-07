@@ -65,10 +65,11 @@ KELVIN_TO_CELSIUS = -273.15
 MRLC_VERSION_MAP = {year: "v2_0_7cds" if year <= 2015 else "v2_1_1"
             for year in range(1992, 2030)}
 
-plots_root = '/data/datasets/Projects/CHANGE/data/outputs/plots'
-era5_cache = '/data/datasets/Projects/CHANGE/data/cache/era5'
-landcov_cache = '/data/datasets/Projects/CHANGE/data/cache/landcov'
-mhw_cache = '/data/datasets/Projects/CHANGE/data/cache/noaa_mhw'
+obs_data_root = '/data/datasets/Projects/CHANGE/data'
+plots_root = os.path.join(obs_data_root, 'outputs', 'plots')
+era5_cache = os.path.join(obs_data_root, 'cache', 'era5')
+landcov_cache = os.path.join(obs_data_root, 'cache', 'landcov')
+mhw_cache = os.path.join(obs_data_root, 'cache', 'noaa_mhw')
 
 # Initialisation
 os.makedirs(plots_root, exist_ok=True)
@@ -709,7 +710,6 @@ display(landcov_da)
 
 # %%
 # Load observed locations from CSV file - Surfers Against Sewage data on gastro cases
-obs_data_root = '/data/datasets/Projects/CHANGE/data'
 obs_data_name = os.path.join(obs_data_root, 'Surfers_Against_Sewage', 'sas_gastro_all_cases_23feb2026.csv')
 
 obs_df = pd.read_csv(obs_data_name)
@@ -881,7 +881,6 @@ obs_df.to_csv(out_data_name)
 
 # %%
 # Load observed locations from CSV file - EA monitoring data on E coli
-obs_data_root = '/data/datasets/Projects/CHANGE/data'
 obs_data_name = os.path.join(obs_data_root, 'EA_Ecoli', 'ALL_BW_data_2012-2025.csv')
 
 obs_df = pd.read_csv(obs_data_name)
@@ -1365,6 +1364,15 @@ out_df = extract_era5_matchups(df)
 print(out_df)
 
 # %% [markdown]
+# ### Save matchups for Zenodo
+
+# %%
+# Save obs_df to CSV file
+matchup_name = os.path.join(obs_data_root, 'outputs', 'change_ea_eng_ecoli_matchups_2012-2025_v1.0.csv')
+obs_df.to_csv(matchup_name, index=False)
+
+
+# %% [markdown]
 # ## Random Forest classification experiments
 
 # %%
@@ -1372,7 +1380,7 @@ print(out_df)
 
 # Get the features and lagged versions in a sensible order
 lag_names = [f'{v}_lag_{d}d' for v, d in itertools.product(['sst', 'tp_mm_daily', 'mhw'], [0] + lag_precip)]
-feature_names = [s.replace('_lag_0d', '') for s in lag_names] + ['chl']
+feature_names = [s.replace('_lag_0d', '') for s in lag_names] + ['chl', 'land_cov_near']
 # feature_names = ['sst', 'tp_mm_daily', 'chl', 'land_cov_near', 'mhw'] + lag_names
 # feature_names = ['sst', 'tp_mm_daily', 'chl']
 # feature_names = ['sst', 'tp_mm_daily', 'chl', 'tp_mm_daily_lag_7d'] + [f'{v}_lag_{d}d' for v, d in itertools.product(['tp_mm_daily'], lag_precip)]
@@ -1441,6 +1449,7 @@ print(f'Mean Absolute Error on test set: {mae:.3f}')
 # %store
 
 # %%
+# Display matchup data
 obs_df
 
 # %%
@@ -1450,12 +1459,10 @@ times_df = tp_mm_daily_da['time'].values
 point = tp_mm_daily_da
 
 # %%
-# Once checked
-# %store -d mhw_da
-
-# %%
+# Store a slice of MHW data for investigating in Data Wrangler
 display(mhw_da)
 piece = mhw_da.sel(time=slice("2025-06-19", "2025-06-20"))
 
 # %%
+# Display what is in variable store
 # %store
