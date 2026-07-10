@@ -14,7 +14,7 @@
 # ---
 
 # %% [markdown]
-# # ESA CHANGE - Experiments with data and Random Forest 
+# # ESA CHANGE - matchups between EO and E coli data
 #
 # ## Installation
 # - Run using this environment (for now): /data/abitibi1/scratch/scratch_disk/pim/miniforge3/envs/phyto-cci-pig
