@@ -16,7 +16,10 @@
 # %% [markdown]
 # # ESA CHANGE - matchups between EO and E coli data
 #
-# ## Installation
+# ### Navigation
+# - Following this, see Random Forest experiments: `notebooks/change_eo_random_forest.ipynb`
+#
+# ### Installation
 # - Run using this environment (for now): /data/abitibi1/scratch/scratch_disk/pim/miniforge3/envs/phyto-cci-pig
 
 # %% [markdown]
@@ -1371,70 +1374,6 @@ print(out_df)
 matchup_name = os.path.join(obs_data_root, 'outputs', 'change_ea_eng_ecoli_matchups_2012-2025_v1.0.csv')
 obs_df.to_csv(matchup_name, index=False)
 
-
-# %% [markdown]
-# ## Random Forest classification experiments
-
-# %%
-# Random Forest to predict E coli given SST and ...
-
-# Get the features and lagged versions in a sensible order
-lag_names = [f'{v}_lag_{d}d' for v, d in itertools.product(['sst', 'tp_mm_daily', 'mhw'], [0] + lag_precip)]
-feature_names = [s.replace('_lag_0d', '') for s in lag_names] + ['chl', 'land_cov_near']
-# feature_names = ['sst', 'tp_mm_daily', 'chl', 'land_cov_near', 'mhw'] + lag_names
-# feature_names = ['sst', 'tp_mm_daily', 'chl']
-# feature_names = ['sst', 'tp_mm_daily', 'chl', 'tp_mm_daily_lag_7d'] + [f'{v}_lag_{d}d' for v, d in itertools.product(['tp_mm_daily'], lag_precip)]
-# feature_names = ['tp_mm_daily']
-
-print(f'Using features: {feature_names}')
-obs_valid_df = obs_df.dropna(subset=feature_names + ['escherichiaColiCount'])
-
-# Terminology: X is table of features, y is array of values to train and predict
-X = obs_valid_df[feature_names]
-y = obs_valid_df['escherichiaColiCount'].transpose()
-
-# Split into training and test sets
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y
-)
-
-# Fit/train a Random Forest classifier
-print(f'Fitting Random Forest classifier to {len(X_train)} training samples of {', '.join(feature_names)}...')
-clf = RandomForestClassifier(max_depth=None, random_state=0)
-clf.fit(X_train, y_train)
-
-# %%
-# Predict E coli counts using the trained model
-
-print(f'Predicting for {len(X_test)} test samples of {', '.join(feature_names)}...')
-y_result = clf.predict(X_test)
-
-# Plot predicted vs actual E coli counts
-plt.scatter(y_test, y_result, alpha=0.5)
-plt.xlabel('Actual E coli count')
-plt.ylabel('Predicted E coli count')
-plt.title('Predicted vs actual E coli counts')
-plt.grid(True)
-plt.show()
-
-# Feature importance
-importances = clf.feature_importances_
-std = np.std([tree.feature_importances_ for tree in clf.estimators_], axis=0)
-forest_importances = pd.Series(importances, index=feature_names)
-
-# Plot feature importances with error bars
-fig, ax = plt.subplots()
-forest_importances.plot.bar(yerr=std, ax=ax)
-ax.set_title("Feature importance using mean decrease in impurity (MDI)")
-ax.set_ylabel("Mean decrease in impurity")
-fig.tight_layout()
-
-# %%
-# Now need to evaluate the model performance, e.g. using R^2, MAE, etc.
-r2 = clf.score(X_test, y_test)
-print(f'R^2 score on test set: {r2:.3f}') 
-mae = np.mean(np.abs(y_test - y_result))
-print(f'Mean Absolute Error on test set: {mae:.3f}')
 
 # %% [markdown]
 # ## Misc commands
