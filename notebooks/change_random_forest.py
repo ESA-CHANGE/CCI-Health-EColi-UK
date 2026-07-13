@@ -51,10 +51,6 @@ from urllib.parse import urljoin
 import re
 import subprocess
 
-# Import PML packages
-# sys.path.append("/users/rsg/anla/code/satellite/match-maker/")
-# from match_maker import extract
-
 # Constants
 KELVIN_TO_CELSIUS = -273.15
 MRLC_VERSION_MAP = {year: "v2_0_7cds" if year <= 2015 else "v2_1_1"
@@ -122,13 +118,14 @@ print(f'Target: {target_name}')
 print(f'Using features: {feature_names}')
 obs_valid_df = obs_df.dropna(subset=feature_names + [target_name])
 
-# Terminology: X is table of features, y is array of values to train and predict
+# Terminology: X is table of features, y is array of target values to train and predict
 X = obs_valid_df[feature_names]
 y = obs_valid_df[target_name].transpose()
 
-# Split into training and test sets
+# Split into training and test sets, ensuring stratified as per the the target categories
+class_labels = y if rf_classifier else None
 X_train, X_test, y_train, y_test_truth = train_test_split(
-    X, y
+    X, y, stratify=class_labels,
 )
 
 # Fit/train a Random Forest classifier/regressor
