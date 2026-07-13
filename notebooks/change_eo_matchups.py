@@ -49,7 +49,7 @@ from   pyproj import Transformer
 import cdsapi
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from datetime import timedelta
+from datetime import timedelta, datetime
 import itertools
 import zipfile
 from scipy.ndimage import distance_transform_edt
@@ -67,6 +67,7 @@ import subprocess
 KELVIN_TO_CELSIUS = -273.15
 MRLC_VERSION_MAP = {year: "v2_0_7cds" if year <= 2015 else "v2_1_1"
             for year in range(1992, 2030)}
+SST_CLIM_NOMINAL_YEAR = 2001
 
 obs_data_root = '/data/datasets/Projects/CHANGE/data'
 plots_root = os.path.join(obs_data_root, 'outputs', 'plots')
@@ -442,7 +443,7 @@ def list_remote_files(url, extension=None, verbose=True, level=0, max_level=999)
 # %%
 # # %%script false --no-raise-error     # Disables this cell
 
-# Open environmental multi-file datasets
+# Open SST multi-file dataset
 
 env_file_patt = '/data/datasets/sst/esa-cci-sst/v3.0.1/global/1d/20[12]?/??/??/*SST*.nc'
 #from dask.distributed import Client
@@ -473,6 +474,57 @@ sst_da = env_ds['analysed_sst'] + KELVIN_TO_CELSIUS
 display(sst_da)
 
 # Do we have to invert the array? 
+
+# %%
+# Open SST climatology multi-file dataset
+# SST-CCI 18-year climatology 1991-2010. Note record date is within year 2001, but it goes wrong end Aug. 2001.
+
+# NB Only needed to fix bad v01.1 climatology dataset, remove preprocess for a better dataset.
+def add_time_dim(ds):
+    ds = ds.assign_coords(time=[datetime.now()])
+    return ds
+
+env_file_patt = '/data/datasets/sst/esa-cci-sst/v01.1/global/1d/climatology/??/??/nc/*SST-CLIMATOLOGY*.nc'
+
+# Estimate number of files included
+print ("Compiling list of dataset files...")
+env_file_list = glob.glob(env_file_patt)
+print (f'Env dataset contains {len(env_file_list)} files')
+
+print ('Opening multi-file env data, this may take several minutes...')
+with ProgressBar():
+    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars='all', preprocess=add_time_dim)
+print ('Done')
+
+# Correct time field, using index as number of days since 2001-01-01 
+env_ds['time'] = pd.to_datetime('2001-01-01 12:00') + pd.to_timedelta(range(len(env_ds['time'])), unit='D')
+
+print(f'Variables: {list(env_ds.keys())}')
+sst_clim_da = env_ds['analysed_sst'] + KELVIN_TO_CELSIUS
+
+# Just keep the region of interest
+sst_clim_region_da = sst_clim_da.sel(
+    lat=slice(obs_df['lat'].min() - lat_pad, obs_df['lat'].max() + lat_pad),
+    lon=slice(obs_df['lon'].min() - lon_pad, obs_df['lon'].max() + lon_pad),
+)
+display(sst_clim_region_da)
+
+# %%
+# Fill gaps in SST climatology
+sst_max_offset = 5
+
+sst_clim_region_fill_da = xr.full_like(sst_clim_region_da, fill_value=np.nan)
+for time in tqdm(sst_clim_region_da.time.values):
+
+    # print(f'{time}', end=', ')
+    day_da = sst_clim_region_da.sel(time=time)
+    day_da = fill_nearest(day_da, max_distance=sst_max_offset)     # Fill missing values with nearest non-missing neighbour
+
+    sst_clim_region_fill_da.loc[dict(time=time)] = day_da
+
+display(sst_clim_region_fill_da)
+# %store sst_clim_region_fill_da
+
 
 # %% [markdown]
 # ### Marine heatwave
@@ -810,41 +862,6 @@ print_df
 #
 
 # %%
-# Time-lagged SST matchups
-lats  = xr.DataArray(obs_df['lat'].values, dims="points")
-lons  = xr.DataArray(obs_df['lon'].values, dims="points")
-
-for lag_days in lag_sst:
-
-# Build coordinate arrays aligned to the DataFrame index
-    times = xr.DataArray(pd.DatetimeIndex(obs_df['time'] + timedelta(days=-lag_days)), dims="points")
-    col_name = f'sst_lag_{lag_days}d'
-
-    # Vectorised extraction
-    print(f'\nExtracting SST matchups with {lag_days} days lag..')
-    method = 'nearest'
-    values = sst_da.sel(
-        time=times,
-        lat=lats,
-        lon=lons,
-        method=method,
-    )
-
-    # Select then interpolate doesn't work for me (3441 missing?)
-    # values = (
-    #     sst_da.sel(time=times, method=method)
-    #     .interp(lat=lats, lon=lons)
-    # )
-
-    obs_df[col_name] = values
-    print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
-
-# Just show selected columns
-print(f'Selected columns:')
-print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
-print_df
-
-# %%
 # Simple plot of the matchup SST values
 plt.plot(obs_df['sst'])
 min(obs_df['sst'])
@@ -911,33 +928,34 @@ obs_df.to_csv(out_data_name)
 # %% [markdown]
 # ### SST matchups
 
-# %%
-# Match-up EA E coli with SST data - vectorised (~5 mins)
-# Missing values: 8.6% that's not bad, so the coords must usually hit the sea pixels. 
-
-# Build coordinate arrays aligned to the DataFrame index
-times = xr.DataArray(pd.DatetimeIndex(obs_df['time']), dims="points")
-lats  = xr.DataArray(obs_df['lat'].values, dims="points")
-lons  = xr.DataArray(obs_df['lon'].values, dims="points")
-
-print('Extracting matchups from dataset, this may take a while...')
-
-# Vectorised extraction
-method = 'nearest'
-values = sst_da.sel(
-    time=times,
-    lat=lats,
-    lon=lons,
-    method=method,
-)
-obs_df['sst'] = values
-
-print(f'Missing values: {obs_df['sst'].isnull().sum().sum() / len(obs_df):.1%}')
-
-# Just show selected columns
-print(f'Selected columns:')
-print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
-print_df
+# %% magic_args="false --no-raise-error     # Disables this cell, superceded by lagged version below " language="script"
+#
+# # Match-up EA E coli with SST data - vectorised (~5 mins)
+# # Missing values: 8.6% that's not bad, so the coords must usually hit the sea pixels. 
+#
+# # Build coordinate arrays aligned to the DataFrame index
+# times = xr.DataArray(pd.DatetimeIndex(obs_df['time']), dims="points")
+# lats  = xr.DataArray(obs_df['lat'].values, dims="points")
+# lons  = xr.DataArray(obs_df['lon'].values, dims="points")
+#
+# print('Extracting matchups from dataset, this may take a while...')
+#
+# # Vectorised extraction
+# method = 'nearest'
+# values = sst_da.sel(
+#     time=times,
+#     lat=lats,
+#     lon=lons,
+#     method=method,
+# )
+# obs_df['sst'] = values
+#
+# print(f'Missing values: {obs_df['sst'].isnull().sum().sum() / len(obs_df):.1%}')
+#
+# # Just show selected columns
+# print(f'Selected columns:')
+# print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
+# display(print_df)
 
 # %% magic_args="false --no-raise-error     # Disables this cell, takes too long" language="script"
 #
@@ -964,7 +982,84 @@ print_df
 # # Just show selected columns
 # print(f'Selected columns:')
 # print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
-# print_df
+# display(print_df)
+
+# %%
+# Time-lagged SST matchups
+
+# Build coordinate arrays aligned to the DataFrame index
+lats  = xr.DataArray(obs_df['lat'].values, dims="points")
+lons  = xr.DataArray(obs_df['lon'].values, dims="points")
+
+for lag_days in [0] + lag_sst:
+    times = xr.DataArray(pd.DatetimeIndex(obs_df['time'] + timedelta(days=-lag_days)), dims="points")
+
+    col_name = 'sst' if lag_days == 0 else f'sst_lag_{lag_days}d'
+
+    # Vectorised extraction
+    print(f'\nExtracting SST matchups with {lag_days} days lag..')
+    method = 'nearest'
+    values = sst_da.sel(
+        time=times,
+        lat=lats,
+        lon=lons,
+        method=method,
+    )
+
+    # Select then interpolate doesn't work for me (3441 missing?)
+    # values = (
+    #     sst_da.sel(time=times, method=method)
+    #     .interp(lat=lats, lon=lons)
+    # )
+
+    obs_df[col_name] = values
+    print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
+
+# Just show selected columns
+print(f'Selected columns:')
+print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
+display(print_df)
+
+# %%
+# Time-lagged SST anomaly matchups
+
+# Build coordinate arrays aligned to the DataFrame index
+lats  = xr.DataArray(obs_df['lat'].values, dims="points")
+lons  = xr.DataArray(obs_df['lon'].values, dims="points")
+
+for lag_days in [0] + lag_sst:
+
+    # Seek times during nominal climatology year, so use the same day of the year but within 2001, ignore the year of the observation.
+    times = xr.DataArray(pd.DatetimeIndex(obs_df['time'].apply(lambda x: x.replace(year=SST_CLIM_NOMINAL_YEAR))
+                                             + timedelta(days=-lag_days)), dims="points")
+    
+    col_name = 'sst_anom' if lag_days == 0 else f'sst_anom_lag_{lag_days}d'
+    col_name_sst = 'sst' if lag_days == 0 else f'sst_lag_{lag_days}d'
+
+    # Vectorised extraction
+    print(f'\nExtracting SST anomaly matchups with {lag_days} days lag..')
+    method = 'nearest'
+    values = sst_clim_region_fill_da.sel(
+        time=times,
+        lat=lats,
+        lon=lons,
+        method=method,
+    )
+
+    sst_clim_lagged = values
+    if lag_days == 0:
+        obs_df['sst_clim'] = sst_clim_lagged
+    # Calculate SST anomaly
+    obs_df[col_name] = obs_df[col_name_sst] - sst_clim_lagged
+    print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
+
+# Just show selected columns
+print(f'Selected columns:')
+print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
+display(print_df)
+
+# %store obs_df
+
 
 # %% [markdown]
 # ### Marine heatwave matchups
@@ -1405,3 +1500,8 @@ piece = mhw_da.sel(time=slice("2025-06-19", "2025-06-20"))
 # %%
 # Display what is in variable store
 # %store
+
+# %%
+# Write to netcdf for checking
+sst_clim_region_fill_da.to_netcdf(os.path.join(obs_data_root, 'cache', 'sst_clim_region_fill.nc'))
+sst_clim_region_da.to_netcdf(os.path.join(obs_data_root, 'cache', 'sst_clim_region.nc'))

@@ -17,14 +17,17 @@ Oct. 2025 to Sep. 2028.
   - [x] Land use
   - [x] Time lags
   - [x] Marine heatwave category
+  - [x] SST anomaly
 - [x] Calculate lat/lon coords for EA UKNG coords.
 - [x] Try matchup using EA E coli data.
 - [x] Dave re sample code for Random Forest.
-- [ ] Try E coli category classification rather than regression (<, =, >)
+- [x] Try E coli category classification rather than regression (<, =, >)
 - [ ] Optuna setup for fiddling with parameters.
+  - [ ] Classifier ROC curve, AUC.
 - [ ] Sk-learn functions for feature selection.
 - [x] Many MHW values are -9e18 but not missing, investigate.
-- [ ] Try IE category classification.
+- [x] Try IE category classification.
+- [ ] Add more metrics for classification: hit rate, false alarms.
 
 
 

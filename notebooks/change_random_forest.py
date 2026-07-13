@@ -14,15 +14,6 @@
 # ---
 
 # %% [markdown]
-# # ESA CHANGE - Random Forest to predict pathogen from EO features
-#
-# ### Navigation
-# - This follows the production of EO matchups: `notebooks/change_eo_matchups.ipynb`
-#
-# ### Installation
-# - Run using this environment (for now): /data/abitibi1/scratch/scratch_disk/pim/miniforge3/envs/phyto-cci-pig
-
-# %% [markdown]
 # ## Initialisation
 
 # %%
@@ -113,16 +104,14 @@ print(f'Configured for {pathogen} {rf_type}: {target_name}\n')
 # ### Function definitions
 
 
-# %%
-
 # %% [markdown]
-# ## Random Forest - regression
+# ## Random Forest - regressor or classifier
 
 # %%
 # Random Forest to predict pathogen given multiple EO features
 
 # Get the features and lagged versions in a sensible order
-lag_names = [f'{v}_lag_{d}d' for v, d in itertools.product(['sst', 'tp_mm_daily', 'mhw'], [0] + lag_precip)]
+lag_names = [f'{v}_lag_{d}d' for v, d in itertools.product(['sst', 'tp_mm_daily', 'mhw', 'sst_anom'], [0] + lag_precip)]
 feature_names = [s.replace('_lag_0d', '') for s in lag_names] + ['chl', 'land_cov_near']
 # feature_names = ['sst', 'tp_mm_daily', 'chl', 'land_cov_near', 'mhw'] + lag_names
 # feature_names = ['sst', 'tp_mm_daily', 'chl']
