@@ -67,7 +67,6 @@ import subprocess
 KELVIN_TO_CELSIUS = -273.15
 MRLC_VERSION_MAP = {year: "v2_0_7cds" if year <= 2015 else "v2_1_1"
             for year in range(1992, 2030)}
-SST_CLIM_NOMINAL_YEAR = 2001
 
 obs_data_root = '/data/datasets/Projects/CHANGE/data'
 plots_root = os.path.join(obs_data_root, 'outputs', 'plots')
@@ -479,7 +478,7 @@ display(sst_da)
 # Open SST climatology multi-file dataset
 # SST-CCI 18-year climatology 1991-2010. Note record date is within year 2001, but it goes wrong end Aug. 2001.
 
-# NB Only needed to fix bad v01.1 climatology dataset, remove preprocess for a better dataset.
+# NB Only needed to fix bad v01.1 climatology dataset, remove preprocess for a better dataset, and 'correct' line below.
 def add_time_dim(ds):
     ds = ds.assign_coords(time=[datetime.now()])
     return ds
@@ -496,7 +495,7 @@ with ProgressBar():
     env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars='all', preprocess=add_time_dim)
 print ('Done')
 
-# Correct time field, using index as number of days since 2001-01-01 
+# Correct time field, using index as number of days since 2001-01-01 - just for bad dataset
 env_ds['time'] = pd.to_datetime('2001-01-01 12:00') + pd.to_timedelta(range(len(env_ds['time'])), unit='D')
 
 print(f'Variables: {list(env_ds.keys())}')
@@ -1023,14 +1022,18 @@ display(print_df)
 # %%
 # Time-lagged SST anomaly matchups
 
+# Find the nominal climatology year from first date
+sst_clim_nominal_year = sst_clim_da.time.dt.year.values[0]
+print('Climatology nominal year for dates:', sst_clim_nominal_year)
+
 # Build coordinate arrays aligned to the DataFrame index
 lats  = xr.DataArray(obs_df['lat'].values, dims="points")
 lons  = xr.DataArray(obs_df['lon'].values, dims="points")
 
 for lag_days in [0] + lag_sst:
 
-    # Seek times during nominal climatology year, so use the same day of the year but within 2001, ignore the year of the observation.
-    times = xr.DataArray(pd.DatetimeIndex(obs_df['time'].apply(lambda x: x.replace(year=SST_CLIM_NOMINAL_YEAR))
+    # Seek times during nominal climatology year, so use the same day of the year but within nominal year, ignore the year of the observation.
+    times = xr.DataArray(pd.DatetimeIndex(obs_df['time'].apply(lambda x: x.replace(year=sst_clim_nominal_year))
                                              + timedelta(days=-lag_days)), dims="points")
     
     col_name = 'sst_anom' if lag_days == 0 else f'sst_anom_lag_{lag_days}d'
