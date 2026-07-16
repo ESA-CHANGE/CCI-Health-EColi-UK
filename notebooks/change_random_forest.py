@@ -46,7 +46,8 @@ from   pyproj import Transformer
 import cdsapi
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, r2_score
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, r2_score, brier_score_loss
+from sklearn.feature_selection import RFE
 from datetime import timedelta
 import itertools
 import zipfile
@@ -137,41 +138,81 @@ X_train, X_test, y_train, y_test_truth = train_test_split(
 )
 
 
+# %% [markdown]
+# ### Optimise RF parameters
+
 # %%
 # Generate and fit RF model to training data, inside function for optimisation 
 def objective (trial):
-    global rf_model, y_test_pred
+    global rf_model, y_test_pred, features_this
+    print(f"\n{pd.to_datetime(pd.Timestamp.now()).strftime('%H:%M')} Trial {trial.number}: ", end="")
+    bonus = 0.0
 
+    # Some parameters to optimise automatically
+    use_rfe_selector = trial.suggest_categorical("use_rfe", [True, False])
+    # feature selection params, e.g. what fraction of features to use
+    # rf params, e.g. depth
+    
     # Construct RF model instance
     if rf_classifier:
         rf_model = RandomForestClassifier(max_depth=None, random_state=0)
     else:
         rf_model = RandomForestRegressor(max_depth=None, random_state=0)
-    
+
+    # Feature selection using recursive feature elimination - takes couple of minutes.
+    # Problem is that accuracy will be slightly lower than all features, but more robust.
+    # Perhaps we could add a robustness contribution to the score? Based on the average importance of selected features.
+    # https://scikit-learn.org/stable/modules/model_evaluation.html#
+    # Need to return the selected features to global sometime
+    X_train_this = X_train
+    X_test_this = X_test
+    features_this = feature_names
+    num_features = len(features_this)
+    if use_rfe_selector:
+        print(f"RFE feature selection...")
+        selector = RFE(rf_model)
+        selector = selector.fit(X_train, y_train)
+
+        # Output the trimmed feature selection
+        X_train_this = selector.transform(X_train_this)
+        X_test_this = selector.transform(X_test_this)
+        features_this = selector.get_feature_names_out()
+        num_features = len(features_this)
+
+        # Display the rankings and threshold
+        rankings = pd.DataFrame({'feature': feature_names, 'ranking': selector.ranking_})
+        sorted = rankings.sort_values('ranking')
+        print(f"{sorted.head(num_features)}\n{'-'*40}\n{sorted.tail(num_features)}")
+
+        # Increase score for robustness. Hack alert!
+        bonus += (1.0 - (num_features / len(feature_names))) * 0.01
+
     # Fit/train a Random Forest classifier/regressor
-    print(f"\nTrial {trial.number}: Fitting Random Forest {rf_type} to {len(X_train)} training samples of {", ".join(feature_names)}...")
-    rf_model.fit(X_train, y_train)
+    print(f"Fitting Random Forest {rf_type} to {len(X_train_this)} training samples of {num_features} features: {", ".join(features_this)}...")
+    rf_model.fit(X_train_this, y_train)
 
     # Predict pathogen counts/category using the trained model
-    print(f"Predicting for {len(X_test)} test samples of {", ".join(feature_names)}...")
-    y_test_pred = rf_model.predict(X_test)
+    print(f"Predicting for {len(X_test)} test samples of {num_features} features: {", ".join(features_this)}...")
+    y_test_pred = rf_model.predict(X_test_this)
 
-    # Metric to optimize
+    # Metric to optimize. Accuracy may not be the best, perhaps AUC?
+    # brier score may not work for regressor
     score = accuracy_score(y_test_truth, y_test_pred)
-    return score
+    return score + bonus
 
 
 # %%
 # Initialise and process the optimisation study (Optuna)
 num_trials = 2
+opt_direction = 'maximize'
 
 print(f"RF parameter optimisation study using Optuna")
-study = optuna.create_study(study_name=f"{rf_type} for {pathogen}", direction='maximize', sampler=optuna.samplers.RandomSampler(seed=42))
+study = optuna.create_study(study_name=f"{rf_type} for {pathogen}", direction=opt_direction, sampler=optuna.samplers.RandomSampler(seed=42))
 study.optimize(objective, n_trials=num_trials)
 
 # Print the best parameters found 
 trial = study.best_trial
-print("\nBest trial score {:.4f}".format(trial.value))
+print(f"\n{'-'*80}\n\nBest trial {trial.number} score {trial.value:.4f}")
 print("Params: ")
 for key, value in trial.params.items():
     print("    {}: {}".format(key, value))
@@ -179,6 +220,19 @@ for key, value in trial.params.items():
 # Refit the model using optimum parameters, for subsequent analysis
 print(f"\nRefitting RF model using best params from trial {study.best_trial.number}")
 best_score = objective(trial)
+feature_names = features_this
+
+# Then store the rf_model and trial for later
+# %store rf_model trial
+
+# %% [markdown]
+# ### Evaluate RF model
+
+# %%
+# Explore RFE model even though it wasn't selected. Remember to rerun set up features after.
+# trials = study.get_trials()
+# print(objective(trials[1]))
+feature_names = features_this
 
 # %%
 # Quick plots of metrics for optimised classifer
