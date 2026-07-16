@@ -18,6 +18,7 @@ Oct. 2025 to Sep. 2028.
   - [x] Time lags
   - [x] Marine heatwave category
   - [x] SST anomaly
+  - [ ] Suspended sediment - backscatter
 - [x] Calculate lat/lon coords for EA UKNG coords.
 - [x] Try matchup using EA E coli data.
 - [x] Dave re sample code for Random Forest.
@@ -27,6 +28,7 @@ Oct. 2025 to Sep. 2028.
 - [ ] Sk-learn functions for feature selection.
 - [x] Many MHW values are -9e18 but not missing, investigate.
 - [x] Try IE category classification.
+- [x] Use stratify on train/test split for classification
 - [ ] Add more metrics for classification: hit rate, false alarms.
 
 
