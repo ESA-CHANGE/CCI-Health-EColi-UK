@@ -14,6 +14,12 @@
 # ---
 
 # %% [markdown]
+# # ESA CHANGE - Experiments with data and Random Forest
+#
+# ### Installation
+# - Run using this environment (for now): /data/abitibi1/scratch/scratch_disk/pim/miniforge3/envs/phyto-cci-pig
+
+# %% [markdown]
 # ## Initialisation
 
 # %%
@@ -50,6 +56,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import re
 import subprocess
+import optuna
 
 # Constants
 KELVIN_TO_CELSIUS = -273.15
@@ -102,9 +109,10 @@ print(f'Configured for {pathogen} {rf_type}: {target_name}\n')
 
 # %% [markdown]
 # ## Random Forest - regressor or classifier
+# To predict pathogen given multiple EO features
 
 # %%
-# Random Forest to predict pathogen given multiple EO features
+# Set up features and targets for training and testing data
 
 # Get the features and lagged versions in a sensible order
 lag_names = [f"{v}_lag_{d}d" for v, d in itertools.product(['sst', 'tp_mm_daily', 'mhw', 'sst_anom'], [0] + lag_precip)]
@@ -128,19 +136,52 @@ X_train, X_test, y_train, y_test_truth = train_test_split(
     X, y, stratify=class_labels,
 )
 
-# Fit/train a Random Forest classifier/regressor
-print(f"Fitting Random Forest {rf_type} to {len(X_train)} training samples of {", ".join(feature_names)}...")
-if rf_classifier:
-    rf_model = RandomForestClassifier(max_depth=None, random_state=0)
-else:
-    rf_model = RandomForestRegressor(max_depth=None, random_state=0)
-rf_model.fit(X_train, y_train)
 
 # %%
-# Predict pathogen counts/category using the trained model
+# Generate and fit RF model to training data, inside function for optimisation 
+def objective (trial):
+    global rf_model, y_test_pred
 
-print(f"Predicting for {len(X_test)} test samples of {", ".join(feature_names)}...")
-y_test_pred = rf_model.predict(X_test)
+    # Construct RF model instance
+    if rf_classifier:
+        rf_model = RandomForestClassifier(max_depth=None, random_state=0)
+    else:
+        rf_model = RandomForestRegressor(max_depth=None, random_state=0)
+    
+    # Fit/train a Random Forest classifier/regressor
+    print(f"\nTrial {trial.number}: Fitting Random Forest {rf_type} to {len(X_train)} training samples of {", ".join(feature_names)}...")
+    rf_model.fit(X_train, y_train)
+
+    # Predict pathogen counts/category using the trained model
+    print(f"Predicting for {len(X_test)} test samples of {", ".join(feature_names)}...")
+    y_test_pred = rf_model.predict(X_test)
+
+    # Metric to optimize
+    score = accuracy_score(y_test_truth, y_test_pred)
+    return score
+
+
+# %%
+# Initialise and process the optimisation study (Optuna)
+num_trials = 2
+
+print(f"RF parameter optimisation study using Optuna")
+study = optuna.create_study(study_name=f"{rf_type} for {pathogen}", direction='maximize', sampler=optuna.samplers.RandomSampler(seed=42))
+study.optimize(objective, n_trials=num_trials)
+
+# Print the best parameters found 
+trial = study.best_trial
+print("\nBest trial score {:.4f}".format(trial.value))
+print("Params: ")
+for key, value in trial.params.items():
+    print("    {}: {}".format(key, value))
+
+# Refit the model using optimum parameters, for subsequent analysis
+print(f"\nRefitting RF model using best params from trial {study.best_trial.number}")
+best_score = objective(trial)
+
+# %%
+# Quick plots of metrics for optimised classifer
 
 # Quick plot appropriate to RF type
 if rf_classifier:
@@ -217,8 +258,8 @@ if rf_classifier:
     # Overall accuracy
     ACC = (TP+TN)/(TP+FP+FN+TN)
 
-    print(f"")
-    print(f"TPR={TPR}, FPR={FPR}, TNR={TNR}, FNR={FNR}, PPV={PPV}, NPV={NPV}, FDR={FDR}, ACC={ACC}")
+    print(f"Classifier confusion matrix metrics for {pathogen} {target_name}:\nLabels: {rf_model.classes_}")
+    print(f"TPR={TPR}, FPR={FPR}, TNR={TNR}, FNR={FNR}, \nPPV={PPV}, NPV={NPV}, FDR={FDR}, ACC={ACC}")
 
 # %% [markdown]
 # ## Misc commands
