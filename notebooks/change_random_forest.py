@@ -150,6 +150,7 @@ def objective (trial):
 
     # Some parameters to optimise automatically
     use_rfe_selector = trial.suggest_categorical("use_rfe", [True, False])
+    rfe_fract_features = trial.suggest_float("rfe_fract_features", 0.1, 0.9, step=0.1) if use_rfe_selector else None
     # feature selection params, e.g. what fraction of features to use
     # rf params, e.g. depth
     
@@ -170,7 +171,7 @@ def objective (trial):
     num_features = len(features_this)
     if use_rfe_selector:
         print(f"RFE feature selection...")
-        selector = RFE(rf_model)
+        selector = RFE(rf_model, n_features_to_select=rfe_fract_features)
         selector = selector.fit(X_train, y_train)
 
         # Output the trimmed feature selection
@@ -184,7 +185,7 @@ def objective (trial):
         sorted = rankings.sort_values('ranking')
         print(f"{sorted.head(num_features)}\n{'-'*40}\n{sorted.tail(num_features)}")
 
-        # Increase score for robustness. Hack alert!
+        # Increase score for robustness, i.e. reduced num of features. Hack alert!
         bonus += (1.0 - (num_features / len(feature_names))) * 0.01
 
     # Fit/train a Random Forest classifier/regressor
@@ -197,13 +198,13 @@ def objective (trial):
 
     # Metric to optimize. Accuracy may not be the best, perhaps AUC?
     # brier score may not work for regressor
-    score = accuracy_score(y_test_truth, y_test_pred)
-    return score + bonus
+    score = accuracy_score(y_test_truth, y_test_pred) + bonus
+    return score
 
 
 # %%
 # Initialise and process the optimisation study (Optuna)
-num_trials = 2
+num_trials = 10
 opt_direction = 'maximize'
 
 print(f"RF parameter optimisation study using Optuna")

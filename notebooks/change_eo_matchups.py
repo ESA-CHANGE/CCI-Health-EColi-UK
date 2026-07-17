@@ -63,6 +63,9 @@ import subprocess
 # sys.path.append("/users/rsg/anla/code/satellite/match-maker/")
 # from match_maker import extract
 
+# Python options, avoid warnings
+xr.set_options(use_new_combine_kwarg_defaults=True)
+
 # Constants
 KELVIN_TO_CELSIUS = -273.15
 MRLC_VERSION_MAP = {year: "v2_0_7cds" if year <= 2015 else "v2_1_1"
@@ -455,10 +458,10 @@ print (f'Env dataset contains {len(env_file_list)} files')
 
 print ('Opening multi-file env data, this may take several minutes...')
 with ProgressBar():
-    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars='all')
+    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords')
 
 # Tried alternative but it still doesn't show progress bar
-#with xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars='all', parallel=True, chunks=dict(index=1)) as env_ds, ProgressBar():
+#with xr.open_mfdataset(env_file_patt, combine='by_coords', parallel=True, chunks=dict(index=1)) as env_ds, ProgressBar():
 #    env_ds.load()  # Force loading to ensure we catch any issues with the files now, while the progress bar is active.
 print ('Done')
 
@@ -492,7 +495,7 @@ print (f'Env dataset contains {len(env_file_list)} files')
 
 print ('Opening multi-file env data, this may take several minutes...')
 with ProgressBar():
-    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars='all', preprocess=add_time_dim)
+    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', preprocess=add_time_dim)
 print ('Done')
 
 # Correct time field, using index as number of days since 2001-01-01 - just for bad dataset
@@ -601,7 +604,7 @@ env_file_list_cache = os.path.join(mhw_cache, '????', '*mhw*.nc')
 print ('Opening multi-file env data, this may take several minutes...')
 # Progress bar shows 100% for every day, useless. Probably due to preprocess script.
 #with ProgressBar():
-env_ds = xr.open_mfdataset(env_file_list_cache, combine='by_coords', data_vars=['heatwave_category'], preprocess=rename_dims)
+env_ds = xr.open_mfdataset(env_file_list_cache, combine='by_coords', preprocess=rename_dims)
 
 print ('Done')
 
@@ -672,12 +675,47 @@ print (f'Env dataset contains {len(env_file_list)} files')
 
 print ('Opening multi-file env data, this may take several minutes...')
 with ProgressBar():
-    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars=[data_var])
+    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords')
 env_ds = env_ds.chunk(time=30)
 print(f'Variables: {list(env_ds.keys())}')
 chl_da = env_ds[data_var]
 chl_da = chl_da.sortby('lat')
 display(chl_da)
+
+
+# %% [markdown]
+# ### Total suspended matter
+
+# %%
+# Open TSM global dataset, 4km daily - takes 25 mins, or breaks my linux box due to memory.
+# OC-CCI Inherent optical properties using QAA algorithm, particulate backscatter Bbp(560), then convert to TSM.
+# 560nm is highly sensitive to TSM but as green band avoids most of absorption by chl-a.
+# e.g. https://resourcewatch.org/data/explore/ocn011-Total-Suspended-Matter
+
+# Pre-process function to reduce memory usage, subscene and drop other variables
+def crop_subscene(ds):
+    vars_to_drop = [v for v in list(ds.data_vars) if v != data_var]
+    if ds.time[0].dt.month == 1 and ds.time[0].dt.day == 1:
+        print(f"{pd.to_datetime(pd.Timestamp.now()).strftime('%H:%M')} - {ds.time[0].values}", flush=True)
+    return ds.sel(lat=slice(area[0], area[2]), lon=slice(area[1], area[3])).drop_vars(vars_to_drop)     # NB Lat is max, min as ordered that way!
+
+env_file_patt = "/data/datasets/CCI/v6.0-release/geographic/netcdf/daily/iop/20[12]?/*.nc"
+data_var = 'bbp_560'
+area = [obs_df['lat'].max()+lat_pad, obs_df['lon'].min()-lon_pad, obs_df['lat'].min()-lat_pad, obs_df['lon'].max()+lon_pad]
+
+# Estimate number of files included
+print ("Compiling list of dataset files...")
+env_file_list = glob.glob(env_file_patt)
+print (f"Env dataset contains {len(env_file_list)} files")
+
+print ("Opening multi-file env data, this may take several minutes...")
+with ProgressBar():
+    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', preprocess=crop_subscene)
+env_ds = env_ds.chunk(time=30)
+print(f"Variables: {list(env_ds.keys())}")
+tsm_da = 1.73 * env_ds[data_var] / 0.015    # in g m^-3.
+tsm_da = tsm_da.sortby('lat')
+display(tsm_da)
 
 # %% [markdown]
 # ### Rainfall
@@ -703,7 +741,7 @@ print (f'Env dataset contains {len(env_file_list)} files')
 
 print ('Opening multi-file env data, this may take several minutes...')
 with ProgressBar():
-    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars=[data_var])
+    env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords')
 env_ds = env_ds.rename({'valid_time': 'time', 'latitude': 'lat', 'longitude': 'lon'})
 print(f'Variables: {list(env_ds.keys())}')
 # Convert rainfall from m to mm
@@ -753,7 +791,7 @@ env_file_list = glob.glob(env_file_patt)
 print (f'Env dataset contains {len(env_file_list)} files')
 
 print ('Opening multi-file env data, this may take several minutes...')
-env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords', data_vars=[data_var])
+env_ds = xr.open_mfdataset(env_file_patt, combine='by_coords')
 print(f'Variables: {list(env_ds.keys())}')
 landcov_da = env_ds[data_var]
 landcov_da = landcov_da.sortby('lat')
@@ -1165,7 +1203,7 @@ for lag_days in [0] + lag_precip:
 
 
 # %% [markdown]
-# ### Chl-a matchups
+# ### Chl-a and TSM matchups
 
 # %% magic_args="false --no-raise-error     # Disables this cell, superceded" language="script"
 #
@@ -1223,16 +1261,19 @@ for lag_days in [0] + lag_precip:
 # # Missing values: 90.6, 90.6, 90.1, 90.3... so if they ALL need to be valid per sample then we end up with only n=30!
 
 # %%
-# Match-up EA E coli with chl-a data - vectorised (~? mins)
+# Match-up EA E coli with chl-a or TSM data - vectorised (~? mins)
 # If missing, it will take the nearest value within NxN neighbourhood.
 # This reduced missing values from 90% to 48%, that seems acceptable now, with genuine gaps due to cloud.
 
 chl_max_offset = 5      # pixels (e.g. 5x4=20 km) allowed away from sample location, to handle cloudy/coast missing data
 method = 'nearest'
+# var = 'chl'           # Use one of these
+var = 'tsm'
 
 # Chop out subscene
 print('Making subscene...')
-chl_region_da = chl_da.sel(
+eo_da = chl_da if var == 'chl' else tsm_da
+eo_region_da = eo_da.sel(
     time=slice(obs_df['time'].min() - pd.Timedelta(days=max(lag_chl)) - time_pad, obs_df['time'].max() + time_pad),
     lat=slice(obs_df['lat'].min() - lat_pad, obs_df['lat'].max() + lat_pad),
     lon=slice(obs_df['lon'].min() - lon_pad, obs_df['lon'].max() + lon_pad),
@@ -1241,9 +1282,9 @@ chl_region_da = chl_da.sel(
 # Loop through time lags for chl-a, including no lag
 for lag_days in [0] + lag_chl:
     if lag_days == 0:
-        col_name = 'chl'
+        col_name = var
     else:
-        col_name = f'chl_lag_{lag_days}d'
+        col_name = f'{var}_lag_{lag_days}d'
 
     obs_df[col_name] = np.nan
     time_lagged = obs_df["time"] + pd.Timedelta(days=-lag_days)
@@ -1257,7 +1298,7 @@ for lag_days in [0] + lag_chl:
     for date, group in obs_df.groupby(time_lagged.dt.date):
 
         print(f'{date}', end=', ')
-        day_da = chl_region_da.sel(time=chl_region_da.time.dt.date.isin(date))
+        day_da = eo_region_da.sel(time=eo_region_da.time.dt.date.isin(date))
         if day_da.time.size == 0:
             print(f'\n   No env data for {date}')
             continue
