@@ -1271,7 +1271,7 @@ method = 'nearest'
 var = 'tsm'
 
 # Chop out subscene
-print('Making subscene...')
+print("Making subscene...")
 eo_da = chl_da if var == 'chl' else tsm_da
 eo_region_da = eo_da.sel(
     time=slice(obs_df['time'].min() - pd.Timedelta(days=max(lag_chl)) - time_pad, obs_df['time'].max() + time_pad),
@@ -1289,10 +1289,10 @@ for lag_days in [0] + lag_chl:
     obs_df[col_name] = np.nan
     time_lagged = obs_df["time"] + pd.Timedelta(days=-lag_days)
 
-    print('\nExtracting matchups from dataset', end='')
+    print(f"\nExtracting {var} matchups from dataset", end='')
     if lag_days != 0:
-        print(f' with {lag_days} days lag', end='')
-    print(', this may take a while...')
+        print(f" with {lag_days} days lag", end='')
+    print(", this may take a while...")
 
     # Group by date so we can use fill_nearest
     for date, group in obs_df.groupby(time_lagged.dt.date):
@@ -1319,14 +1319,14 @@ for lag_days in [0] + lag_chl:
         )
         obs_df.loc[group.index, col_name] = values.values
 
-    print('\n')     # End date line
-    print(f'Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}')
+    print("\n")     # End date line
+    print(f"Missing values: {obs_df[col_name].isnull().sum().sum() / len(obs_df):.1%}")
 
 # Store results
 # %store obs_df
 
 # Just show selected columns
-print(f'Selected columns:')
+print(f"Selected columns:")
 print_df = pd.concat([obs_df.iloc[:, :6], obs_df.iloc[:, 16:]], axis='columns')
 print_df
 

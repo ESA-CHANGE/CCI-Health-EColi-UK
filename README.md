@@ -18,18 +18,18 @@ Oct. 2025 to Sep. 2028.
   - [x] Time lags
   - [x] Marine heatwave category
   - [x] SST anomaly
-  - [ ] Suspended sediment - backscatter
+  - [x] Suspended sediment - backscatter
 - [x] Calculate lat/lon coords for EA UKNG coords.
 - [x] Try matchup using EA E coli data.
 - [x] Dave re sample code for Random Forest.
 - [x] Try E coli category classification rather than regression (<, =, >)
-- [ ] Optuna setup for fiddling with parameters.
+- [x] Optuna setup for fiddling with parameters.
   - [ ] Classifier ROC curve, AUC.
-- [ ] Sk-learn functions for feature selection.
+- [x] Sk-learn functions for feature selection.
 - [x] Many MHW values are -9e18 but not missing, investigate.
 - [x] Try IE category classification.
 - [x] Use stratify on train/test split for classification
-- [ ] Add more metrics for classification: hit rate, false alarms.
+- [x] Add more metrics for classification: hit rate, false alarms.
 
 
 
@@ -81,6 +81,8 @@ I think I should switch to CCI matchup Python script.
         echo -n "$file - "
     ncdump -h $file | tail +3 | head -3
     end
+
+- Stefan mentioned a Dask dashboard webpage to investigate silent open_mfdataset processes and memory usage.
 
 ### Convert netCDF from int64 to int32 so ncview can handle it
     ncap2 --overwrite --script 'valid_time=int(valid_time)' input_file.nc output_file.nc
