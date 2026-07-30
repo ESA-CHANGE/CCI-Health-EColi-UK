@@ -107,6 +107,7 @@ If we had got the Zarr dataset working, perhaps we could have extracted the whol
 - Why are single features higher r^2 than several combined?
 - Macarena recommended [Optuna - A hyperparameter optimization framework](https://optuna.org/) and helpful [Random Forest optimisation tutorial](https://medium.com/@ehsannabatchian/optimizing-random-forest-models-a-deep-dive-into-hyperparameter-tuning-with-optuna-b8e4fe7f3670).
 - Here's a readable post on optimising: [How do I improve the performance of my Random Forest model on Databricks?](https://community.databricks.com/t5/machine-learning/how-do-i-improve-the-performance-of-my-random-forest-model-on/td-p/142507)
+- Sk-learn: [Recursive feature elimination with cross-validation](https://scikit-learn.org/stable/auto_examples/feature_selection/plot_rfe_with_cross_validation.html)
 
 ## CDS processing issues
 - See your jobs in queue at: https://cds.climate.copernicus.eu/requests?tab=all

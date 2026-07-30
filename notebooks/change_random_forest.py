@@ -44,10 +44,11 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from   pyproj import Transformer
 import cdsapi
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, r2_score, brier_score_loss
-from sklearn.feature_selection import RFE
+from sklearn.feature_selection import RFE, RFECV
+from sklearn.linear_model import LogisticRegression
 from datetime import timedelta
 import itertools
 import zipfile
@@ -150,7 +151,9 @@ def objective (trial):
     bonus = 0.0
 
     # Some parameters to optimise automatically
-    use_rfe_selector = trial.suggest_categorical("use_rfe", [True, False])
+    use_selector = trial.suggest_categorical("selector", ['none', 'rfe'])   # Later add 'rfecv'
+    use_rfe_selector = (use_selector == 'rfe')
+    use_rfecv_selector = (use_selector == 'rfecv')
     rfe_fract_features = trial.suggest_float("rfe_fract_features", 0.1, 0.9, step=0.1) if use_rfe_selector else None
     # target params, e.g. number of health-related thresholds to use.
     # feature selection params, e.g. what fraction of features to use
@@ -166,7 +169,7 @@ def objective (trial):
     # Problem is that accuracy will be slightly lower than all features, but more robust.
     # Perhaps we could add a robustness contribution to the score? Based on the average importance of selected features.
     # https://scikit-learn.org/stable/modules/model_evaluation.html#
-    # Need to return the selected features to global sometime
+    # How about using cross-validation training/testing, that would prove robustness of smaller feature set.
     X_train_this = X_train
     X_test_this = X_test
     features_this = feature_names
@@ -182,14 +185,39 @@ def objective (trial):
         features_this = selector.get_feature_names_out()
         num_features = len(features_this)
 
+        # Increase score for robustness, i.e. reduced num of features. Hack alert!
+        bonus += (1.0 - (num_features / len(feature_names))) * bonus_weight_robustness
+
+    # Or use recursive feature selection with cross-validation
+    # Not used yet, for future development
+    if use_rfecv_selector:
+        min_features_to_select = 1  # Minimum number of features to consider
+        clf = LogisticRegression()
+        cv = StratifiedKFold(n_splits=5, shuffle=False, random_state=42)
+        print(f"RFE-CV feature selection...")
+        selector = RFECV(
+            estimator=clf,
+            step=1,
+            cv=cv,
+            scoring="accuracy",
+            min_features_to_select=min_features_to_select,
+            n_jobs=2,
+        )
+        selector.fit(X, y)      # Not sure about this yet
+
+        # Output the trimmed feature selection
+        # Doesn't work yet, didn't converge. Bonus hopefully not needed?
+        X_train_this = selector.transform(X)
+        X_test_this = selector.transform(X)
+        features_this = selector.get_feature_names_out()
+        num_features = len(features_this)
+
+    if use_selector != 'none':
         # Display the rankings and threshold
         rankings = pd.DataFrame({'orig_index':range(len(feature_names)), 'feature': feature_names, 'ranking': selector.ranking_})
         sorted = rankings.sort_values('ranking')
         sorted.reset_index(drop=True, inplace=True)
         print(f"{sorted.head(num_features)}\n{'-'*40}\n{sorted.tail(-num_features)}")
-
-        # Increase score for robustness, i.e. reduced num of features. Hack alert!
-        bonus += (1.0 - (num_features / len(feature_names))) * bonus_weight_robustness
 
     # Fit/train a Random Forest classifier/regressor
     print(f"Fitting Random Forest {rf_type} to {len(X_train_this)} training samples of {num_features} features: {", ".join(features_this)}...")
@@ -207,11 +235,11 @@ def objective (trial):
 
 # %%
 # Initialise and process the optimisation study (Optuna)
-num_trials = 10
+num_trials = 20
 metric = 'accuracy'
 opt_direction = 'maximize'
-opt_dir_val = +1 if opt_direction == 'maximise' else -1
-bonus_weight_robustness = 0.01          # Hack to favour smaller feature sets
+opt_dir_val = +1 if opt_direction.startswith('max') else -1
+bonus_weight_robustness = 0.03          # Hack to favour smaller feature sets
 
 print(f"RF parameter optimisation study using Optuna: {opt_direction} {metric}, {num_trials} trials")
 study = optuna.create_study(study_name=f"{rf_type} for {pathogen}", direction=opt_direction, sampler=optuna.samplers.RandomSampler(seed=42))
@@ -231,7 +259,8 @@ for key, value in trial.params.items():
         value = np.round(value, 4)
     print(f"    {key}: {value}")
 
-# Refit the model using optimum parameters, for subsequent analysis
+# Refit the model using optimum parameters, for subsequent analysis.
+# From here onwards, use features_this and num_features to refer to winning model
 print(f"\nRefitting RF model using best params from trial {study.best_trial.number}")
 best_score = objective(trial)
 num_features = len(features_this)
