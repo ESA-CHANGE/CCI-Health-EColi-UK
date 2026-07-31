@@ -70,6 +70,11 @@ xr.set_options(use_new_combine_kwarg_defaults=True)
 KELVIN_TO_CELSIUS = -273.15
 MRLC_VERSION_MAP = {year: "v2_0_7cds" if year <= 2015 else "v2_1_1"
             for year in range(1992, 2030)}
+# ECOLI_GOOD_THRESH = 500
+ECOLI_GOOD_THRESH = 100     # Lower threshold to give more positive samples
+ECOLI_EXC_THRESH = 250
+IE_GOOD_THRESH = 200
+IE_EXC_THRESH = 100
 
 obs_data_root = '/data/datasets/Projects/CHANGE/data'
 plots_root = os.path.join(obs_data_root, 'outputs', 'plots')
@@ -961,6 +966,18 @@ obs_df = obs_df[obs_df['siteType'] == 'Coastal']
 # Store the data with the lat, lon, time columns
 out_data_name = os.path.join(obs_data_root, 'EA_Ecoli', 'ALL_BW_data_2012-2025_latlon.csv')
 obs_df.to_csv(out_data_name)
+
+# %%
+# Add pathogen classification columns. Note that for EC and UK regs these are done over several years at 90th/95th percentile, not single sample.
+# Idea - we could combine these
+# https://data.waterrangers.com/standards/193/info, https://knowledgehub.ice.org.uk/cpd/water/bathing-water-for-rivers/
+# Ecoli 2 class approx. 98:2, 3 class 95:2:2. IE 2 class 96:4, 3 class 92:4:4. I chose classes to work with alphabetic order.
+obs_df['ecoli_2class'] = obs_df['escherichiaColiCount'].apply(lambda x: 'Good' if x < ECOLI_GOOD_THRESH else 'Caution')
+obs_df['ecoli_3class'] = obs_df['escherichiaColiCount'].apply(lambda x: 'Very good' if x < ECOLI_EXC_THRESH else ('Good' if x < ECOLI_GOOD_THRESH else 'Caution'))
+obs_df['ie_2class'] = obs_df['intestinalEnterococciCount'].apply(lambda x: 'Good' if x < IE_GOOD_THRESH else 'Caution')
+obs_df['ie_3class'] = obs_df['intestinalEnterococciCount'].apply(lambda x: 'Very good' if x < IE_EXC_THRESH else ('Good' if x < IE_GOOD_THRESH else 'Caution'))
+
+# %store obs_df
 
 # %% [markdown]
 # ### SST matchups

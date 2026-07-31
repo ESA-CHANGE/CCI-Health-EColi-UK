@@ -66,11 +66,11 @@ MRLC_VERSION_MAP = {year: "v2_0_7cds" if year <= 2015 else "v2_1_1"
             for year in range(1992, 2030)}
 TARGETS = {
     'ecoli': {
-        'classifier':   'escherichiaColiQualifier',
+        'classifier':   'ecoli_2class',
         'regressor':    'escherichiaColiCount',
     },
    'ie': {
-        'classifier':   'intestinalEnterococciQualifier',
+        'classifier':   'ie_2class',
         'regressor':    'intestinalEnterococciCount',
     },
 }
@@ -136,7 +136,7 @@ y = obs_valid_df[target_name].transpose()
 # Split into training and test sets, ensuring stratified as per the the target categories
 class_labels = y if rf_classifier else None
 X_train, X_test, y_train, y_test_truth = train_test_split(
-    X, y, stratify=class_labels,
+    X, y, stratify=class_labels, 
 )
 
 
@@ -230,16 +230,18 @@ def objective (trial):
     # Metric to optimize. Accuracy may not be the best, perhaps AUC?
     # brier score may not work for regressor
     score = accuracy_score(y_test_truth, y_test_pred) + (bonus * opt_dir_val)
+    if bonus != 0:
+        print(f"(Score {score - (bonus * opt_dir_val):.5f} + bonus {bonus:.3f})")
     return score
 
 
 # %%
 # Initialise and process the optimisation study (Optuna)
-num_trials = 20
+num_trials = 10
 metric = 'accuracy'
 opt_direction = 'maximize'
 opt_dir_val = +1 if opt_direction.startswith('max') else -1
-bonus_weight_robustness = 0.03          # Hack to favour smaller feature sets
+bonus_weight_robustness = 0.01          # Hack to favour smaller feature sets
 
 print(f"RF parameter optimisation study using Optuna: {opt_direction} {metric}, {num_trials} trials")
 study = optuna.create_study(study_name=f"{rf_type} for {pathogen}", direction=opt_direction, sampler=optuna.samplers.RandomSampler(seed=42))
