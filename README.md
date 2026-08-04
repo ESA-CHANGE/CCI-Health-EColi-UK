@@ -22,9 +22,14 @@ Oct. 2025 to Sep. 2028.
 - [x] Calculate lat/lon coords for EA UKNG coords.
 - [x] Try matchup using EA E coli data.
 - [x] Dave re sample code for Random Forest.
-- [x] Try E coli category classification rather than regression (<, =, >)
+- [x] Try E coli category classification rather than regression
 - [x] Optuna setup for fiddling with parameters.
   - [ ] Classifier ROC curve, AUC.
+  - [x] Balanced class weights to prioritise minority class.
+  - [x] AUC metric for optimisation.
+  - [ ] Try F1 metric instead for precision and recall?
+  - [ ] Try over/undersampling to emphasise minority positive class.
+  - [ ] Other tips on imbalanced datasets.
 - [x] Sk-learn functions for feature selection.
 - [x] Many MHW values are -9e18 but not missing, investigate.
 - [x] Try IE category classification.
@@ -101,7 +106,11 @@ If we had got the Zarr dataset working, perhaps we could have extracted the whol
 ## Evaluation metrics
 - So far r^2.
 - [Evaluating a Random Forest model](https://medium.com/analytics-vidhya/evaluating-a-random-forest-model-9d165595ad56) on Medium, using sk-learn.
-
+- Useful articles on imbalanced datasets:
+  - [10 Scikit-learn Tricks for Working with Imbalanced Datasets](https://medium.com/@connect.hashblock/10-scikit-learn-tricks-for-working-with-imbalanced-datasets-bca159f0d745)
+  - [Navigating Imbalanced Datasets with Pandas and Scikit-learn
+](https://machinelearningmastery.com/navigating-imbalanced-datasets-with-pandas-and-scikit-learn/)
+  - I should try the Smote under/oversampling; or perhaps BalancedRandomForest.
 
 ## Optimising feature selection
 - Why are single features higher r^2 than several combined?

@@ -46,7 +46,8 @@ from   pyproj import Transformer
 import cdsapi
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, r2_score, brier_score_loss
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, \
+    r2_score, brier_score_loss, classification_report, roc_auc_score
 from sklearn.feature_selection import RFE, RFECV
 from sklearn.linear_model import LogisticRegression
 from datetime import timedelta
@@ -146,7 +147,7 @@ X_train, X_test, y_train, y_test_truth = train_test_split(
 # %%
 # Generate and fit RF model to training data, inside function for optimisation 
 def objective (trial):
-    global rf_model, y_test_pred, features_this
+    global rf_model, y_test_pred, X_test_this, features_this
     print(f"\n{pd.to_datetime(pd.Timestamp.now()).strftime('%H:%M')} Trial {trial.number}: ", end="")
     bonus = 0.0
 
@@ -161,7 +162,9 @@ def objective (trial):
     
     # Construct RF model instance
     if rf_classifier:
-        rf_model = RandomForestClassifier(max_depth=None, random_state=0)
+        # Balanced mode automatically adjust weights inversely proportional to class frequencies in the input data
+        # as n_samples / (n_classes * np.bincount(y))
+        rf_model = RandomForestClassifier(max_depth=None, random_state=0, class_weight='balanced')
     else:
         rf_model = RandomForestRegressor(max_depth=None, random_state=0)
 
@@ -229,7 +232,12 @@ def objective (trial):
 
     # Metric to optimize. Accuracy may not be the best, perhaps AUC?
     # brier score may not work for regressor
-    score = accuracy_score(y_test_truth, y_test_pred) + (bonus * opt_dir_val)
+    if rf_classifier:
+        # ROC-AUC needs numeric predictors rather than class labels
+        prob_prediction_class_1 = rf_model.predict_proba(X_test_this)[:, 1]
+        score = roc_auc_score(y_test_truth, prob_prediction_class_1) + (bonus * opt_dir_val)
+    else:
+        score = accuracy_score(y_test_truth, y_test_pred) + (bonus * opt_dir_val)
     if bonus != 0:
         print(f"(Score {score - (bonus * opt_dir_val):.5f} + bonus {bonus:.3f})")
     return score
@@ -321,6 +329,8 @@ print(f"Performance for {pathogen} {rf_type} on {target_name} ({num_features} fe
 if rf_classifier:
     acc = accuracy_score(y_test_truth, y_test_pred)
     print(f"Accuracy score: {acc:.3f}")
+    print(classification_report(y_test_truth, y_test_pred))
+    print("ROC AUC:", roc_auc_score(y_test_truth, rf_model.predict_proba(X_test_this)[:,1]))
 
 else:
     r2 = r2_score(y_test_truth, y_test_pred)

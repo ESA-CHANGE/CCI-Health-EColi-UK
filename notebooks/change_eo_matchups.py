@@ -71,7 +71,7 @@ KELVIN_TO_CELSIUS = -273.15
 MRLC_VERSION_MAP = {year: "v2_0_7cds" if year <= 2015 else "v2_1_1"
             for year in range(1992, 2030)}
 # ECOLI_GOOD_THRESH = 500
-ECOLI_GOOD_THRESH = 100     # Lower threshold to give more positive samples
+ECOLI_GOOD_THRESH = 100     # Lower threshold to give more positive samples, probably better to oversample
 ECOLI_EXC_THRESH = 250
 IE_GOOD_THRESH = 200
 IE_EXC_THRESH = 100
