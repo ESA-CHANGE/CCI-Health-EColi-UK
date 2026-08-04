@@ -17,14 +17,24 @@ Oct. 2025 to Sep. 2028.
   - [x] Land use
   - [x] Time lags
   - [x] Marine heatwave category
+  - [x] SST anomaly
+  - [x] Suspended sediment - backscatter
 - [x] Calculate lat/lon coords for EA UKNG coords.
 - [x] Try matchup using EA E coli data.
 - [x] Dave re sample code for Random Forest.
-- [ ] Try E coli category classification rather than regression (<, =, >)
-- [ ] Optuna setup for fiddling with parameters.
-- [ ] Sk-learn functions for feature selection.
+- [x] Try E coli category classification rather than regression
+- [x] Optuna setup for fiddling with parameters.
+  - [ ] Classifier ROC curve, AUC.
+  - [x] Balanced class weights to prioritise minority class.
+  - [x] AUC metric for optimisation.
+  - [ ] Try F1 metric instead for precision and recall?
+  - [ ] Try over/undersampling to emphasise minority positive class.
+  - [ ] Other tips on imbalanced datasets.
+- [x] Sk-learn functions for feature selection.
 - [x] Many MHW values are -9e18 but not missing, investigate.
-- [ ] Try IE category classification.
+- [x] Try IE category classification.
+- [x] Use stratify on train/test split for classification
+- [x] Add more metrics for classification: hit rate, false alarms.
 
 
 
@@ -77,6 +87,8 @@ I think I should switch to CCI matchup Python script.
     ncdump -h $file | tail +3 | head -3
     end
 
+- Stefan mentioned a Dask dashboard webpage to investigate silent open_mfdataset processes and memory usage.
+
 ### Convert netCDF from int64 to int32 so ncview can handle it
     ncap2 --overwrite --script 'valid_time=int(valid_time)' input_file.nc output_file.nc
 
@@ -94,12 +106,17 @@ If we had got the Zarr dataset working, perhaps we could have extracted the whol
 ## Evaluation metrics
 - So far r^2.
 - [Evaluating a Random Forest model](https://medium.com/analytics-vidhya/evaluating-a-random-forest-model-9d165595ad56) on Medium, using sk-learn.
-
+- Useful articles on imbalanced datasets:
+  - [10 Scikit-learn Tricks for Working with Imbalanced Datasets](https://medium.com/@connect.hashblock/10-scikit-learn-tricks-for-working-with-imbalanced-datasets-bca159f0d745)
+  - [Navigating Imbalanced Datasets with Pandas and Scikit-learn
+](https://machinelearningmastery.com/navigating-imbalanced-datasets-with-pandas-and-scikit-learn/)
+  - I should try the Smote under/oversampling; or perhaps BalancedRandomForest.
 
 ## Optimising feature selection
 - Why are single features higher r^2 than several combined?
 - Macarena recommended [Optuna - A hyperparameter optimization framework](https://optuna.org/) and helpful [Random Forest optimisation tutorial](https://medium.com/@ehsannabatchian/optimizing-random-forest-models-a-deep-dive-into-hyperparameter-tuning-with-optuna-b8e4fe7f3670).
 - Here's a readable post on optimising: [How do I improve the performance of my Random Forest model on Databricks?](https://community.databricks.com/t5/machine-learning/how-do-i-improve-the-performance-of-my-random-forest-model-on/td-p/142507)
+- Sk-learn: [Recursive feature elimination with cross-validation](https://scikit-learn.org/stable/auto_examples/feature_selection/plot_rfe_with_cross_validation.html)
 
 ## CDS processing issues
 - See your jobs in queue at: https://cds.climate.copernicus.eu/requests?tab=all
