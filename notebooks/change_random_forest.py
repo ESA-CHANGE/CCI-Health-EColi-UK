@@ -16,6 +16,11 @@
 # %% [markdown]
 # # ESA CHANGE - Experiments with data and Random Forest
 #
+# ### Navigation
+# - Before this, extract EO matchups: `notebooks/change_eo_matchups.ipynb`
+# - The matchup data can be accessed here: https://doi.org/10.5281/zenodo.21237857
+# - Alternatively, a sample dataset is included: 
+#
 # ### Installation
 # - Run using this environment (for now): /data/abitibi1/scratch/scratch_disk/pim/miniforge3/envs/phyto-cci-pig
 
@@ -139,6 +144,7 @@ class_labels = y if rf_classifier else None
 X_train, X_test, y_train, y_test_truth = train_test_split(
     X, y, stratify=class_labels, 
 )
+print(f"Number of samples: training: n={len(X_train)}, testing: n={len(X_test)}, validation: n=<not yet>")
 
 
 # %% [markdown]
@@ -386,3 +392,33 @@ point = tp_mm_daily_da
 # %%
 # Display what is in variable store
 # %store
+
+# %%
+# Prepare sample dataset for including in repo
+
+# Extract a small number of rows, stratified
+X_train, X_test, y_train, y_test_truth = train_test_split(
+    X, y, stratify=class_labels, test_size=100, random_state=0, 
+)
+print(f"Number of samples: {len(X_test)}")
+print (f"Num caution: {len(y_test_truth[y_test_truth == 'Caution'])}")
+
+# Join features and target
+sample_df = pd.concat([X_test, y_test_truth], axis=1)
+
+display(sample_df)
+
+# Output to CSV
+out_data_name = os.path.join('..', 'data', 'esa_change_uk_wq_sample_data.csv')
+sample_df.to_csv(out_data_name)
+
+
+# %%
+# Load sample dataset for testing Random Forest code
+obs_data_name = os.path.join('..', 'data', 'esa_change_uk_wq_sample_data.csv')
+
+obs_df = pd.read_csv(obs_data_name)
+
+display(obs_df)
+
+# Now you can continue with the 'Random Forest' section of this notebook
