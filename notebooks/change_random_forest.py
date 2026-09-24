@@ -19,7 +19,7 @@
 # ### Navigation
 # - Before this, extract EO matchups: `notebooks/change_eo_matchups.ipynb`
 # - The matchup data can be accessed here: https://doi.org/10.5281/zenodo.21237857
-# - Alternatively, a sample dataset is included: 
+# - Alternatively, a sample dataset is included: `data/esa_change_uk_wq_sample_data.csv`, which can be loaded using cell at the end of this notebook: 'Load sample dataset'.
 #
 # ### Installation
 # - Run using this environment (for now): /data/abitibi1/scratch/scratch_disk/pim/miniforge3/envs/phyto-cci-pig
