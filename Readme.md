@@ -20,6 +20,9 @@ UK bathing waters are frequently affected by faecal contamination from agricultu
 
 ### Installing
 
+* For efficiency, the Jupyter notebook files are held in the repository as 'percent' .py files. These can be easily convert to notebook '.ipynb' files as follows:  \
+`conda install jupytext` or `pip install jupytext`  \
+`jupytext --set-formats ipynb,py <file>.ipynb`
 * How/where to download your program
 * Any modifications needed to be made to files/folders
 
